@@ -1,5 +1,3 @@
-#!/usr/bin/julia -p 4
-
 using ProgressMeter
 
 in_file = ARGS[1]
