@@ -40,6 +40,7 @@ these_used_teams = copy(used_teams)
 if used_dd_week > 0
   push!(these_used_teams, used_dd_team)
 end
+sort!(these_used_teams)
 deleteat!(team_indices, these_used_teams)
 
 dd_already_happened = used_dd_week > 0
