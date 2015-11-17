@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	//"github.com/fighterlyt/permutation"
+	"io"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -40,32 +42,105 @@ func init() {
 }
 
 func main() {
-	flag.Parse()
 
-	csvFile, err := os.Open(*dataFile)
+	reader, err := parseFlags()
+
 	if err != nil {
-		fmt.Println("error: ", err.Error())
+		fmt.Printf("error parsing flags : %s\n", err)
 		return
 	}
-	defer csvFile.Close()
-	reader := csv.NewReader(csvFile)
-	records, err := reader.ReadAll()
+
+	// Throw away the first row (headers)
+	_, err = reader.Read()
 	if err != nil {
-		fmt.Println("error: ", err.Error())
+		fmt.Printf("error reading first row : %s\n", err)
 		return
 	}
-	if *doubleTeam != "" {
-		switch dw := *doubleWeek; {
-		case dw == 0:
-			fmt.Printf("error: ddweek required\n")
+
+	// Parse remaining data and store it
+	var teams []string
+	var probs [][]float64
+	for {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fmt.Printf("error reading data : %s\n", err)
 			return
-		case dw > uint(len(pastSelection)):
-			fmt.Printf("error: invalid ddweek %d\n", *doubleWeek)
+		}
+
+		if len(row) == 0 {
+			break
+		}
+
+		team, prob, err := parseRow(row)
+		if err != nil {
+			fmt.Printf("error parsing row : %s\n", err)
+			return
+		}
+
+		teams = append(teams, team)
+		probs = append(probs, prob)
+	}
+
+	if len(teams) != len(probs) {
+		fmt.Printf("error parsing data : %d teams != %d rows\n", len(teams), len(probs))
+		return
+	}
+
+	nWeeks := int(0)
+	for i, row := range probs {
+		if nWeeks == 0 {
+			nWeeks = len(row)
+			continue
+		}
+		if len(row) != nWeeks {
+			fmt.Printf("error parsing data : weeks in row %d (%d) != weeks in row 1 (%d)\n", i, len(row), nWeeks)
 			return
 		}
 	}
 
 	fmt.Printf("CPUs: %d\ndataFile: %s\ndoubleWeek: %d\ndoubleTeam: %s\npastSelection: %v\n\n",
 		numCPU, *dataFile, *doubleWeek, *doubleTeam, pastSelection)
-	fmt.Printf("Probabilities:\n%v\n", records)
+	fmt.Printf("Teams:%v\n", teams)
+	fmt.Printf("Probabilities:\n%v\n", probs)
+}
+
+func parseFlags() (*csv.Reader, error) {
+	flag.Parse()
+
+	csvFile, err := os.Open(*dataFile)
+	if err != nil {
+		return nil, err
+	}
+	//defer csvFile.Close()
+	reader := csv.NewReader(csvFile)
+	if *doubleTeam != "" {
+		switch dw := *doubleWeek; {
+		case dw == 0:
+			return reader, errors.New("ddweek required")
+		case dw > uint(len(pastSelection)):
+			fmt.Printf("error: invalid ddweek %d\n", *doubleWeek)
+			return reader, fmt.Errorf("invalid ddweek %d\n", *doubleWeek)
+		}
+	}
+	return reader, err
+}
+
+// Slices are passed by reference
+func parseRow(row []string) (string, []float64, error) {
+	var err error
+	team := row[0]
+	probs := make([]float64, len(row)-1)
+	for i, rec := range row[1:] {
+		if rec == "#N/A" {
+			continue
+		}
+		probs[i], err = strconv.ParseFloat(rec, 64)
+		if err != nil {
+			return team, probs, err
+		}
+	}
+	return team, probs, nil
 }
