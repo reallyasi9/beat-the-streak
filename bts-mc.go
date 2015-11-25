@@ -105,6 +105,14 @@ func main() {
 		numCPU, *dataFile, *doubleWeek, *doubleTeam, pastSelection)
 	fmt.Printf("Teams:%v\n", teams)
 	fmt.Printf("Probabilities:\n%v\n", probs)
+
+	pastIndices := parseSelection(teams, pastSelection)
+	// Delete rows from the probability table
+	for _, i := range pastIndices {
+		probs = append(probs[:i], probs[i+1:]...)
+	}
+
+	fmt.Printf("Cleaned Probabilities:\n%v\n", probs)
 }
 
 func parseFlags() (*csv.Reader, error) {
@@ -143,4 +151,25 @@ func parseRow(row []string) (string, []float64, error) {
 		}
 	}
 	return team, probs, nil
+}
+
+func parseSelection(teams []string, sel selection) []int {
+	teamMap := make(map[string]int)
+	for i, s := range teams {
+		teamMap[s] = i
+	}
+
+	selected := make([]int, len(sel))
+	for i, s := range sel {
+		selected[i] = teamMap[s]
+	}
+
+	return selected
+}
+
+func totalProb(probs [][]float64, selections []int) float64 {
+	if len(selections) == 1 {
+		return probs[selections[0]][0]
+	}
+	return probs[selections[0]][0] * totalProb(probs[:][1:], selections[1:])
 }
