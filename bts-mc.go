@@ -2,45 +2,16 @@ package main
 
 import (
 	"encoding/csv"
-	"errors"
 	"flag"
 	"fmt"
-	"github.com/cespare/permute"
-	"github.com/sethgrid/multibar"
+	//"github.com/cespare/permute"
+	//"github.com/sethgrid/multibar"
 	"io"
 	"os"
 	"runtime"
 	"strconv"
-	"strings"
 	//"sync"
 )
-
-// Convenience type, so I can parse a list of strings from the command line
-type selection []string
-
-// String method, part of the flag.Value interface
-func (s *selection) String() string {
-	return fmt.Sprint(*s)
-}
-
-// Set method, part of the flag.Value interface
-func (s *selection) Set(value string) error {
-	if len(*s) > 0 {
-		return errors.New("selection flag already set")
-	}
-	for _, sel := range strings.Split(value, ",") {
-		*s = append(*s, sel)
-	}
-	return nil
-}
-
-// Convenience type, so I can return both a probability and a selection from a goroutine
-type permutation struct {
-	prob   float64
-	perm   []int
-	ddprob float64
-	ddweek int
-}
 
 var numCPU = runtime.GOMAXPROCS(0)
 var dataFile = flag.String("data", "", "CSV file containing probabilities of win")
@@ -57,19 +28,19 @@ func main() {
 
 	if err != nil {
 		fmt.Printf("error parsing flags : %s\n", err)
-		return
+		os.Exit(-1)
 	}
 
 	// Throw away the first row (headers)
 	_, err = reader.Read()
 	if err != nil {
 		fmt.Printf("error reading first row : %s\n", err)
-		return
+		os.Exit(-1)
 	}
 
 	// Parse remaining data and store it
 	var teams []string
-	var probs [][]float64
+	probs := make(probabilityMap)
 	for {
 		row, err := reader.Read()
 		if err == io.EOF {
@@ -77,7 +48,7 @@ func main() {
 		}
 		if err != nil {
 			fmt.Printf("error reading data : %s\n", err)
-			return
+			os.Exit(-1)
 		}
 
 		if len(row) == 0 {
@@ -87,34 +58,35 @@ func main() {
 		team, prob, err := parseRow(row)
 		if err != nil {
 			fmt.Printf("error parsing row : %s\n", err)
-			return
+			os.Exit(-1)
 		}
 
 		teams = append(teams, team)
-		probs = append(probs, prob)
+		probs[team] = prob
 	}
 
 	if len(teams) != len(probs) {
 		fmt.Printf("error parsing data : %d teams != %d rows\n", len(teams), len(probs))
-		return
+		os.Exit(-1)
 	}
 
+	// Make sure the number of weeks is consistent across teams
 	nWeeks := int(0)
-	for i, row := range probs {
+	for k, v := range probs {
 		if nWeeks == 0 {
-			nWeeks = len(row)
+			nWeeks = len(v)
 			continue
 		}
-		if len(row) != nWeeks {
-			fmt.Printf("error parsing data : weeks in row %d (%d) != weeks in row 1 (%d)\n", i, len(row), nWeeks)
-			return
+		if len(v) != nWeeks {
+			fmt.Printf("error parsing data : weeks for team %s (%d) does not match other teams (%d)\n", k, len(v), nWeeks)
+			os.Exit(-1)
 		}
 	}
 
 	// Can't be predicting past the end of the season
 	if *weekNumber > nWeeks {
 		fmt.Printf("error parsing week : only %d weeks in data, week %d requested\n", nWeeks, *weekNumber)
-		return
+		os.Exit(-1)
 	}
 
 	// Default remaining teams to all teams
@@ -138,11 +110,11 @@ func main() {
 	} else {
 		if len(remainingTeams) > nWeeks-*weekNumber+2 {
 			fmt.Printf("error parsing remaining : not enough weeks remaining (%d) to use remaining teams (%d)\n", nWeeks-*weekNumber+1, len(remainingTeams))
-			return
+			os.Exit(-1)
 		}
 		if len(remainingTeams) < nWeeks-*weekNumber+1 {
 			fmt.Printf("error parsing remaining : not enough teams remaining (%d) to fill remaining weeks (%d)\n", len(remainingTeams), nWeeks-*weekNumber+1)
-			return
+			os.Exit(-1)
 		}
 		if len(remainingTeams) == nWeeks-*weekNumber+2 {
 			doubleDown = true
@@ -155,107 +127,25 @@ func main() {
 	fmt.Printf("nWeeks: %d\nweekNumber: %d\ndoubleDown: %v\n", nWeeks, *weekNumber, doubleDown)
 	fmt.Printf("Probabilities:\n%v\n", probs)
 
-	remainingIndices := parseSelection(teams, remainingTeams)
-	// Filter rows from the probability table
-	filteredProbs := probs[:0]
-	for _, i := range remainingIndices {
-		filteredProbs = append(filteredProbs, probs[i])
+	filteredProbs, err := probs.FilterTeams(remainingTeams)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(-1)
+	}
+	filteredProbs, err = filteredProbs.FilterWeeks(*weekNumber)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(-1)
 	}
 
 	fmt.Printf("Filtered Probabilities:\n%v\n", filteredProbs)
-
-	progressBars, _ := multibar.New()
-
-	indices := make([]int, len(filteredProbs))
-	for i := 0; i < len(filteredProbs); i++ {
-		indices[i] = i
-	}
-
-	remainingN, err := factorial(int64(len(remainingIndices) - 1))
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	if doubleDown {
-		progressBars.Println("Double-Down Progress")
-
-		for ddt := range remainingIndices {
-			progressBars.MakeBar(int(remainingN), teams[ddt])
-		}
-
-		results := make(chan permutation, len(remainingIndices))
-		for _, ddi := range remainingIndices {
-			ddprob, ddweek := maxFloat64(probs[ddi])
-
-			go func(ddi int, remainingIndices []int) {
-
-				// Cut from remaining indices
-				var theseIndices []int
-				copy(theseIndices, remainingIndices)
-				theseIndices = append(theseIndices[:ddi], theseIndices[ddi+1:]...)
-				// Filter rows from the probability table
-				theseProbs := filteredProbs[:0]
-				for _, i := range theseIndices {
-					theseProbs = append(theseProbs, filteredProbs[i])
-				}
-
-				idx := make([]int, len(theseIndices))
-				copy(idx, theseIndices)
-				bestProb := 0.
-				bestSel := make([]int, len(theseProbs))
-				count := int64(0)
-				p := permute.Ints(idx)
-				for p.Permute() {
-					thisProb := totalProb(theseProbs, idx)
-					if thisProb > bestProb {
-						bestProb = thisProb
-						copy(bestSel, idx)
-					}
-					count++
-					progressBars.Bars[ddi].Update(int(count))
-				}
-				results <- permutation{bestProb, bestSel, ddprob, ddweek}
-			}(ddi, remainingIndices)
-		}
-
-		best := <-results
-		bestdd := 0
-		for i := 1; i < len(remainingIndices); i++ {
-			tmp := <-results
-			if tmp.prob*tmp.ddprob > best.prob*best.ddprob {
-				best = tmp
-				bestdd = i
-			}
-		}
-
-		fmt.Printf("Best: %v @ %f (with %d on %d)\n", best.perm, best.prob, bestdd, best.ddweek)
-
-	} else {
-		updateFunction := progressBars.MakeBar(int(remainingN), "Permuting")
-		bestProb := 0.
-		bestSel := make([]int, len(filteredProbs))
-		count := int64(0)
-		p := permute.Ints(indices)
-		for p.Permute() {
-			thisProb := totalProb(filteredProbs, remainingIndices)
-			if thisProb > bestProb {
-				bestProb = thisProb
-				copy(bestSel, indices)
-			}
-			count++
-			updateFunction(int(count))
-		}
-
-		fmt.Printf("Best: %v @ %f\n", bestSel, bestProb)
-	}
 
 }
 
 func parseFlags() (*csv.Reader, error) {
 	flag.Parse()
 	if *dataFile == "" {
-		return nil, errors.New("data flag required")
+		return nil, fmt.Errorf("data flag required")
 	}
 
 	csvFile, err := os.Open(*dataFile)
@@ -326,7 +216,7 @@ func maxFloat64(s []float64) (m float64, i int) {
 
 func factorial(v int64) (f int64, err error) {
 	if v < 0 {
-		err = errors.New("argument must be positive")
+		err = fmt.Errorf("argument must be positive")
 		return 0, err
 	}
 	if v <= 1 {
