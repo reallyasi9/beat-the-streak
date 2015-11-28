@@ -5,14 +5,17 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	//"github.com/fighterlyt/permutation"
+	"github.com/cespare/permute"
+	"github.com/sethgrid/multibar"
 	"io"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	//"sync"
 )
 
+// Convenience type, so I can parse a list of strings from the command line
 type selection []string
 
 // String method, part of the flag.Value interface
@@ -31,14 +34,21 @@ func (s *selection) Set(value string) error {
 	return nil
 }
 
+// Convenience type, so I can return both a probability and a selection from a goroutine
+type permutation struct {
+	prob   float64
+	perm   []int
+	ddprob float64
+	ddweek int
+}
+
 var numCPU = runtime.GOMAXPROCS(0)
 var dataFile = flag.String("data", "", "CSV file containing probabilities of win")
-var doubleWeek = flag.Uint("ddweek", 0, "double-down week (1-indexed)")
-var doubleTeam = flag.String("ddteam", "", "double-down team")
-var pastSelection selection
+var weekNumber = flag.Int("week", -1, "Week number (defaults to inferring from remaining teams)")
+var remainingTeams selection
 
 func init() {
-	flag.Var(&pastSelection, "selection", "comma-separated list of selected teams, in order (excluding double-down)")
+	flag.Var(&remainingTeams, "remaining", "comma-separated list of remaining teams")
 }
 
 func main() {
@@ -101,22 +111,152 @@ func main() {
 		}
 	}
 
-	fmt.Printf("CPUs: %d\ndataFile: %s\ndoubleWeek: %d\ndoubleTeam: %s\npastSelection: %v\n\n",
-		numCPU, *dataFile, *doubleWeek, *doubleTeam, pastSelection)
-	fmt.Printf("Teams:%v\n", teams)
-	fmt.Printf("Probabilities:\n%v\n", probs)
-
-	pastIndices := parseSelection(teams, pastSelection)
-	// Delete rows from the probability table
-	for _, i := range pastIndices {
-		probs = append(probs[:i], probs[i+1:]...)
+	// Can't be predicting past the end of the season
+	if *weekNumber > nWeeks {
+		fmt.Printf("error parsing week : only %d weeks in data, week %d requested\n", nWeeks, *weekNumber)
+		return
 	}
 
-	fmt.Printf("Cleaned Probabilities:\n%v\n", probs)
+	// Default remaining teams to all teams
+	if len(remainingTeams) == 0 {
+		remainingTeams = teams
+	}
+
+	// Infer week number
+	doubleDown := false
+	if *weekNumber <= 0 {
+		if len(remainingTeams) <= len(teams)-2 {
+			fmt.Println("warning : inferring week number may miss double-down selection, specify week flag to fix")
+		}
+		if len(remainingTeams) == 1 {
+			doubleDown = false
+			*weekNumber = nWeeks
+		} else {
+			*weekNumber = len(teams) - len(remainingTeams) + 1
+			doubleDown = true
+		}
+	} else {
+		if len(remainingTeams) > nWeeks-*weekNumber+2 {
+			fmt.Printf("error parsing remaining : not enough weeks remaining (%d) to use remaining teams (%d)\n", nWeeks-*weekNumber+1, len(remainingTeams))
+			return
+		}
+		if len(remainingTeams) < nWeeks-*weekNumber+1 {
+			fmt.Printf("error parsing remaining : not enough teams remaining (%d) to fill remaining weeks (%d)\n", len(remainingTeams), nWeeks-*weekNumber+1)
+			return
+		}
+		if len(remainingTeams) == nWeeks-*weekNumber+2 {
+			doubleDown = true
+		}
+	}
+
+	fmt.Printf("CPUs: %d\ndataFile: %s\nremainingTeams: %s\n",
+		numCPU, *dataFile, remainingTeams)
+	fmt.Printf("Teams: %v\n", teams)
+	fmt.Printf("nWeeks: %d\nweekNumber: %d\ndoubleDown: %v\n", nWeeks, *weekNumber, doubleDown)
+	fmt.Printf("Probabilities:\n%v\n", probs)
+
+	remainingIndices := parseSelection(teams, remainingTeams)
+	// Filter rows from the probability table
+	filteredProbs := probs[:0]
+	for _, i := range remainingIndices {
+		filteredProbs = append(filteredProbs, probs[i])
+	}
+
+	fmt.Printf("Filtered Probabilities:\n%v\n", filteredProbs)
+
+	progressBars, _ := multibar.New()
+
+	indices := make([]int, len(filteredProbs))
+	for i := 0; i < len(filteredProbs); i++ {
+		indices[i] = i
+	}
+
+	remainingN, err := factorial(int64(len(remainingIndices) - 1))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	if doubleDown {
+		progressBars.Println("Double-Down Progress")
+
+		for ddt := range remainingIndices {
+			progressBars.MakeBar(int(remainingN), teams[ddt])
+		}
+
+		results := make(chan permutation, len(remainingIndices))
+		for _, ddi := range remainingIndices {
+			ddprob, ddweek := maxFloat64(probs[ddi])
+
+			go func(ddi int, remainingIndices []int) {
+
+				// Cut from remaining indices
+				var theseIndices []int
+				copy(theseIndices, remainingIndices)
+				theseIndices = append(theseIndices[:ddi], theseIndices[ddi+1:]...)
+				// Filter rows from the probability table
+				theseProbs := filteredProbs[:0]
+				for _, i := range theseIndices {
+					theseProbs = append(theseProbs, filteredProbs[i])
+				}
+
+				idx := make([]int, len(theseIndices))
+				copy(idx, theseIndices)
+				bestProb := 0.
+				bestSel := make([]int, len(theseProbs))
+				count := int64(0)
+				p := permute.Ints(idx)
+				for p.Permute() {
+					thisProb := totalProb(theseProbs, idx)
+					if thisProb > bestProb {
+						bestProb = thisProb
+						copy(bestSel, idx)
+					}
+					count++
+					progressBars.Bars[ddi].Update(int(count))
+				}
+				results <- permutation{bestProb, bestSel, ddprob, ddweek}
+			}(ddi, remainingIndices)
+		}
+
+		best := <-results
+		bestdd := 0
+		for i := 1; i < len(remainingIndices); i++ {
+			tmp := <-results
+			if tmp.prob*tmp.ddprob > best.prob*best.ddprob {
+				best = tmp
+				bestdd = i
+			}
+		}
+
+		fmt.Printf("Best: %v @ %f (with %d on %d)\n", best.perm, best.prob, bestdd, best.ddweek)
+
+	} else {
+		updateFunction := progressBars.MakeBar(int(remainingN), "Permuting")
+		bestProb := 0.
+		bestSel := make([]int, len(filteredProbs))
+		count := int64(0)
+		p := permute.Ints(indices)
+		for p.Permute() {
+			thisProb := totalProb(filteredProbs, remainingIndices)
+			if thisProb > bestProb {
+				bestProb = thisProb
+				copy(bestSel, indices)
+			}
+			count++
+			updateFunction(int(count))
+		}
+
+		fmt.Printf("Best: %v @ %f\n", bestSel, bestProb)
+	}
+
 }
 
 func parseFlags() (*csv.Reader, error) {
 	flag.Parse()
+	if *dataFile == "" {
+		return nil, errors.New("data flag required")
+	}
 
 	csvFile, err := os.Open(*dataFile)
 	if err != nil {
@@ -124,15 +264,6 @@ func parseFlags() (*csv.Reader, error) {
 	}
 	//defer csvFile.Close()
 	reader := csv.NewReader(csvFile)
-	if *doubleTeam != "" {
-		switch dw := *doubleWeek; {
-		case dw == 0:
-			return reader, errors.New("ddweek required")
-		case dw > uint(len(pastSelection)):
-			fmt.Printf("error: invalid ddweek %d\n", *doubleWeek)
-			return reader, fmt.Errorf("invalid ddweek %d\n", *doubleWeek)
-		}
-	}
 	return reader, err
 }
 
@@ -143,7 +274,7 @@ func parseRow(row []string) (string, []float64, error) {
 	probs := make([]float64, len(row)-1)
 	for i, rec := range row[1:] {
 		if rec == "#N/A" {
-			continue
+			continue // defaults to zero
 		}
 		probs[i], err = strconv.ParseFloat(rec, 64)
 		if err != nil {
@@ -171,5 +302,36 @@ func totalProb(probs [][]float64, selections []int) float64 {
 	if len(selections) == 1 {
 		return probs[selections[0]][0]
 	}
-	return probs[selections[0]][0] * totalProb(probs[:][1:], selections[1:])
+	p := probs[selections[0]][0]
+	if p == 0 {
+		return 0
+	}
+	return p * totalProb(probs[:][1:], selections[1:])
+}
+
+func maxFloat64(s []float64) (m float64, i int) {
+	i = -1
+	if len(s) > 0 {
+		i = 0
+		m = s[0]
+	}
+	for j, v := range s[1:] {
+		if v > m {
+			i = j
+			m = v
+		}
+	}
+	return m, i
+}
+
+func factorial(v int64) (f int64, err error) {
+	if v < 0 {
+		err = errors.New("argument must be positive")
+		return 0, err
+	}
+	if v <= 1 {
+		return 1, nil
+	}
+	v1, _ := factorial(v - 1)
+	return v * v1, nil
 }
