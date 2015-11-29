@@ -4,13 +4,14 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
-	//"github.com/cespare/permute"
+	"github.com/fighterlyt/permutation"
 	//"github.com/sethgrid/multibar"
 	"io"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
-	//"sync"
+	"sync"
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
@@ -127,18 +128,91 @@ func main() {
 	fmt.Printf("nWeeks: %d\nweekNumber: %d\ndoubleDown: %v\n", nWeeks, *weekNumber, doubleDown)
 	fmt.Printf("Probabilities:\n%v\n", probs)
 
-	filteredProbs, err := probs.FilterTeams(remainingTeams)
+	err = probs.KeepTeams(remainingTeams)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(-1)
 	}
-	filteredProbs, err = filteredProbs.FilterWeeks(*weekNumber)
+	err = probs.FilterWeeks(*weekNumber)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(-1)
 	}
 
-	fmt.Printf("Filtered Probabilities:\n%v\n", filteredProbs)
+	fmt.Printf("Filtered Probabilities:\n%v\n", probs)
+
+	// Here we go.
+
+	// For permutations to work properly, these should be sorted
+	sort.Strings(remainingTeams)
+
+	// Nope.
+	if doubleDown {
+		fmt.Println("Not yet, yo.")
+		os.Exit(0)
+	}
+
+	// Divy up the permutations
+	permutator, err := permutation.NewPerm(remainingTeams, nil)
+	if err != nil {
+		fmt.Print("unable to create permutation of remaining teams")
+		os.Exit(-2)
+	}
+
+	nPermutations := permutator.Left()
+	pPerThread := nPermutations / numCPU
+	wg := &sync.WaitGroup{}
+
+	wg.Add(3 /*numCPU*/)
+	go func() {
+		permutator, _ := permutation.NewPerm(remainingTeams, nil)
+		bestProb := 0.
+		bestSel := make(selection, len(remainingTeams))
+		copy(bestSel, permutator.NextN(0*pPerThread).(selection))
+		for p, err := permutator.Next(); err == nil && permutator.Index() < pPerThread; p, err = permutator.Next() {
+			totalProb, _ := probs.TotalProb(p.(selection))
+			if totalProb > bestProb {
+				bestProb = totalProb
+				copy(bestSel, p.(selection))
+				fmt.Printf("Selection %v Prob (%f)\n", bestSel, bestProb)
+			}
+		}
+		wg.Done()
+	}()
+
+	go func() {
+		permutator, _ := permutation.NewPerm(remainingTeams, nil)
+		bestProb := 0.
+		bestSel := make(selection, len(remainingTeams))
+		copy(bestSel, permutator.NextN(1*pPerThread).(selection))
+		for p, err := permutator.Next(); err == nil && permutator.Index() < pPerThread; p, err = permutator.Next() {
+			totalProb, _ := probs.TotalProb(p.(selection))
+			if totalProb > bestProb {
+				bestProb = totalProb
+				copy(bestSel, p.(selection))
+				fmt.Printf("Selection %v Prob (%f)\n", bestSel, bestProb)
+			}
+		}
+		wg.Done()
+	}()
+
+	go func() {
+		permutator, _ := permutation.NewPerm(remainingTeams, nil)
+		bestProb := 0.
+		bestSel := make(selection, len(remainingTeams))
+		copy(bestSel, permutator.NextN(2*pPerThread).(selection))
+		for p, err := permutator.Next(); err == nil && permutator.Index() < pPerThread; p, err = permutator.Next() {
+			totalProb, _ := probs.TotalProb(p.(selection))
+			if totalProb > bestProb {
+				bestProb = totalProb
+				copy(bestSel, p.(selection))
+				fmt.Printf("Selection %v Prob (%f)\n", bestSel, bestProb)
+			}
+		}
+		wg.Done()
+	}()
+
+	wg.Wait()
 
 }
 
@@ -188,17 +262,6 @@ func parseSelection(teams []string, sel selection) []int {
 	return selected
 }
 
-func totalProb(probs [][]float64, selections []int) float64 {
-	if len(selections) == 1 {
-		return probs[selections[0]][0]
-	}
-	p := probs[selections[0]][0]
-	if p == 0 {
-		return 0
-	}
-	return p * totalProb(probs[:][1:], selections[1:])
-}
-
 func maxFloat64(s []float64) (m float64, i int) {
 	i = -1
 	if len(s) > 0 {
@@ -212,16 +275,4 @@ func maxFloat64(s []float64) (m float64, i int) {
 		}
 	}
 	return m, i
-}
-
-func factorial(v int64) (f int64, err error) {
-	if v < 0 {
-		err = fmt.Errorf("argument must be positive")
-		return 0, err
-	}
-	if v <= 1 {
-		return 1, nil
-	}
-	v1, _ := factorial(v - 1)
-	return v * v1, nil
 }
