@@ -153,7 +153,12 @@ func main() {
 	// These are the results from my goroutines
 	results := make(chan orderperm)
 
+	// I could make this more complicated by closing the channel, but I will instead just count the goroutines
+	var nGoes int
+
 	if doubleDown {
+
+		nGoes = len(remainingTeams)
 
 		// Each dd team gets its own goroutine
 		for _, ddt := range remainingTeams {
@@ -168,6 +173,8 @@ func main() {
 		}
 
 	} else {
+
+		nGoes = numCPU
 
 		// Divy up the permutations
 		permutator, err := permutation.NewPerm(remainingTeams, nil)
@@ -186,14 +193,14 @@ func main() {
 		//bc, _ := multibar.New()
 		//go bc.Listen()
 
-		for i := 0; i < numCPU; i++ {
+		for i := 0; i < nGoes; i++ {
 			//bc.MakeBar(pPerThread, fmt.Sprintf("permutations %d/%d", i+1, numCPU))
 			go permute(i, pPerThread, remainingTeams, probs, "", -1, results)
 		}
 	}
 
 	//wg.Wait()
-	for i := 0; i < numCPU; i++ {
+	for i := 0; i < nGoes; i++ {
 		perm := <-results
 		if perm.ddweek >= 0 && perm.ddteam != "" {
 			perm.prob *= probs[perm.ddteam][perm.ddweek]
