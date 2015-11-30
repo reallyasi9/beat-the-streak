@@ -313,7 +313,7 @@ func permute(i int, pPerThread int, remainingTeams selection, probs probabilityM
 		if totalProb > bestPerm.prob {
 			bestPerm.prob = totalProb
 			copy(bestPerm.perm, thisSel)
-			//fmt.Printf("%d Selection %v Prob (%f)\n", i, bestSel, bestProb)
+			fmt.Printf("New best %v\n", bestPerm)
 		}
 	}
 
