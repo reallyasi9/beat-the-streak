@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	//"sync"
+	"math"
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
@@ -152,10 +153,20 @@ func main() {
 	// These are the results from my goroutines
 	results := make(chan orderperm)
 
-	// Nope.
 	if doubleDown {
-		fmt.Println("Not yet, yo.")
-		os.Exit(0)
+
+		// Each dd team gets its own goroutine
+		for _, ddt := range remainingTeams {
+			_, ddw := maxFloat64(probs[ddt])
+
+			teamsAfterDD, _ := remainingTeams.CopyWithoutTeam(ddt)
+			probsAfterDD, _ := probs.CopyWithoutTeam(ddt)
+
+			pPerThread := math.MaxInt32
+			go permute(0, pPerThread, teamsAfterDD, probsAfterDD, ddt, ddw, results)
+
+		}
+
 	} else {
 
 		// Divy up the permutations
@@ -177,13 +188,16 @@ func main() {
 
 		for i := 0; i < numCPU; i++ {
 			//bc.MakeBar(pPerThread, fmt.Sprintf("permutations %d/%d", i+1, numCPU))
-			go permute(i, pPerThread, remainingTeams, probs, results)
+			go permute(i, pPerThread, remainingTeams, probs, "", -1, results)
 		}
 	}
 
 	//wg.Wait()
 	for i := 0; i < numCPU; i++ {
 		perm := <-results
+		if perm.ddweek >= 0 && perm.ddteam != "" {
+			perm.prob *= probs[perm.ddteam][perm.ddweek]
+		}
 		if perm.prob > bestPerm.prob {
 			bestPerm = perm
 		}
@@ -280,7 +294,7 @@ func permutationNext(data sort.Interface) bool {
 	return true
 }
 
-func permute(i int, pPerThread int, remainingTeams selection, probs probabilityMap, results chan orderperm) {
+func permute(i int, pPerThread int, remainingTeams selection, probs probabilityMap, ddteam string, ddweek int, results chan orderperm) {
 	thisSel := make(selection, len(remainingTeams))
 	copy(thisSel, remainingTeams)
 
@@ -290,7 +304,7 @@ func permute(i int, pPerThread int, remainingTeams selection, probs probabilityM
 	}
 
 	bestProb, _ := probs.TotalProb(thisSel)
-	bestPerm := orderperm{bestProb, thisSel, "", -1}
+	bestPerm := orderperm{bestProb, thisSel, ddteam, ddweek}
 	//fmt.Printf("%d Selection %v Prob (%f)\n", i, bestSel, bestProb)
 
 	for j := 0; j < pPerThread && permutationNext(thisSel); j++ {
