@@ -13,6 +13,7 @@ import (
 	"strconv"
 	//"sync"
 	"math"
+	"strings"
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
@@ -207,6 +208,7 @@ func main() {
 		}
 		if perm.prob > bestPerm.prob {
 			bestPerm = perm
+			copy(bestPerm.perm, perm.perm)
 		}
 	}
 
@@ -320,7 +322,7 @@ func permute(i int, pPerThread int, remainingTeams selection, probs probabilityM
 		if totalProb > bestPerm.prob {
 			bestPerm.prob = totalProb
 			copy(bestPerm.perm, thisSel)
-			fmt.Printf("New best %v\n", bestPerm)
+			fmt.Printf("%d,%d,%f,%s,%s,%d\n", i, j, bestPerm.prob, strings.Join(bestPerm.perm, ","), ddteam, ddweek)
 		}
 	}
 
