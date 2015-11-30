@@ -5,13 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"github.com/fighterlyt/permutation"
-	"github.com/sethgrid/multibar"
+	//"github.com/sethgrid/multibar"
 	"io"
 	"os"
 	"runtime"
 	"sort"
 	"strconv"
-	"sync"
+	//"sync"
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
@@ -146,54 +146,50 @@ func main() {
 	// For permutations to work properly, these should be sorted
 	sort.Strings(remainingTeams)
 
+	// This is the best I can do
+	var bestPerm orderperm
+
+	// These are the results from my goroutines
+	results := make(chan orderperm)
+
 	// Nope.
 	if doubleDown {
 		fmt.Println("Not yet, yo.")
 		os.Exit(0)
+	} else {
+
+		// Divy up the permutations
+		permutator, err := permutation.NewPerm(remainingTeams, nil)
+
+		if err != nil {
+			fmt.Print("unable to create permutation of remaining teams")
+			os.Exit(-2)
+		}
+
+		nPermutations := permutator.Left()
+		pPerThread := nPermutations / numCPU
+
+		//wg := &sync.WaitGroup{}
+		//wg.Add(numCPU)
+
+		//bc, _ := multibar.New()
+		//go bc.Listen()
+
+		for i := 0; i < numCPU; i++ {
+			//bc.MakeBar(pPerThread, fmt.Sprintf("permutations %d/%d", i+1, numCPU))
+			go permute(i, pPerThread, remainingTeams, probs, results)
+		}
 	}
 
-	// Divy up the permutations
-	permutator, err := permutation.NewPerm(remainingTeams, nil)
-
-	if err != nil {
-		fmt.Print("unable to create permutation of remaining teams")
-		os.Exit(-2)
-	}
-
-	nPermutations := permutator.Left()
-	pPerThread := nPermutations / numCPU
-	wg := &sync.WaitGroup{}
-
-	wg.Add(numCPU)
-
+	//wg.Wait()
 	for i := 0; i < numCPU; i++ {
-		go func(i int) {
-			thisSel := make(selection, len(remainingTeams))
-			copy(thisSel, remainingTeams)
-
-			// skip!
-			for nSkip := 0; nSkip < pPerThread*i; nSkip++ {
-				permutationNext(thisSel)
-			}
-
-			bestProb, _ := probs.TotalProb(thisSel)
-			bestSel := make(selection, len(remainingTeams))
-			copy(bestSel, thisSel)
-			fmt.Printf("%d Selection %v Prob (%f)\n", i, bestSel, bestProb)
-
-			for j := 0; j < pPerThread && permutationNext(thisSel); j++ {
-				totalProb, _ := probs.TotalProb(thisSel)
-				if totalProb > bestProb {
-					bestProb = totalProb
-					copy(bestSel, thisSel)
-					fmt.Printf("%d Selection %v Prob (%f)\n", i, bestSel, bestProb)
-				}
-			}
-			wg.Done()
-		}(i)
+		perm := <-results
+		if perm.prob > bestPerm.prob {
+			bestPerm = perm
+		}
 	}
 
-	wg.Wait()
+	fmt.Printf("Best: %v\n", bestPerm)
 
 }
 
@@ -282,4 +278,31 @@ func permutationNext(data sort.Interface) bool {
 		j--
 	}
 	return true
+}
+
+func permute(i int, pPerThread int, remainingTeams selection, probs probabilityMap, results chan orderperm) {
+	thisSel := make(selection, len(remainingTeams))
+	copy(thisSel, remainingTeams)
+
+	// skip!
+	for nSkip := 0; nSkip < pPerThread*i; nSkip++ {
+		permutationNext(thisSel)
+	}
+
+	bestProb, _ := probs.TotalProb(thisSel)
+	bestPerm := orderperm{bestProb, thisSel, "", -1}
+	//fmt.Printf("%d Selection %v Prob (%f)\n", i, bestSel, bestProb)
+
+	for j := 0; j < pPerThread && permutationNext(thisSel); j++ {
+		//bc.Bars[i].Update(j)
+		totalProb, _ := probs.TotalProb(thisSel)
+		if totalProb > bestPerm.prob {
+			bestPerm.prob = totalProb
+			copy(bestPerm.perm, thisSel)
+			//fmt.Printf("%d Selection %v Prob (%f)\n", i, bestSel, bestProb)
+		}
+	}
+
+	results <- bestPerm
+	//wg.Done()
 }
