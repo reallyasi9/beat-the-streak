@@ -10,6 +10,7 @@ import (
 // Convenience type, so I can parse a list of strings from the command line
 type selection sort.StringSlice
 
+// StringSlice interface
 func (s selection) Len() int           { return len(s) }
 func (s selection) Less(i, j int) bool { return s[i] < s[j] }
 func (s selection) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
@@ -30,6 +31,7 @@ func (s *selection) Set(value string) error {
 	return nil
 }
 
+// Filter a single team from the selection
 func (s *selection) CopyWithoutTeam(t string) (selection, error) {
 	out := make(selection, len(*s))
 	copy(out, *s)
@@ -101,4 +103,33 @@ type orderperm struct {
 	perm   selection
 	ddteam string
 	ddweek int
+}
+
+func (o *orderperm) UpdateGT(other orderperm) bool {
+	if other.prob > o.prob {
+		o.prob = other.prob
+		copy(o.perm, other.perm)
+		o.ddteam = other.ddteam
+		o.ddweek = other.ddweek
+		return true
+	}
+	return false
+}
+
+func (o *orderperm) CSV(pm probabilityMap, nWeeks int) (csv []string) {
+	csv = append(csv, fmt.Sprint(o.prob))
+	skippedWeeks := nWeeks - len(o.perm)
+	for i := 0; i < skippedWeeks; i++ {
+		csv = append(csv, fmt.Sprint(i), "", "1")
+	}
+	for i, t := range o.perm {
+		csv = append(csv, fmt.Sprint(i+skippedWeeks), t, fmt.Sprint(pm[t][i]))
+	}
+	csv = append(csv, fmt.Sprint(o.ddweek), o.ddteam)
+	if o.ddweek >= 0 {
+		csv = append(csv, fmt.Sprint(pm[o.ddteam][o.ddweek]))
+	} else {
+		csv = append(csv, "1")
+	}
+	return csv
 }

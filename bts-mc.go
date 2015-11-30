@@ -4,7 +4,6 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
-	"github.com/fighterlyt/permutation"
 	//"github.com/sethgrid/multibar"
 	"io"
 	"os"
@@ -14,12 +13,14 @@ import (
 	//"sync"
 	"math"
 	"strings"
+	"time"
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
 var dataFile = flag.String("data", "", "CSV file containing probabilities of win")
 var weekNumber = flag.Int("week", -1, "Week number (defaults to inferring from remaining teams)")
 var remainingTeams selection
+var nWeeks int
 
 func init() {
 	flag.Var(&remainingTeams, "remaining", "comma-separated list of remaining teams")
@@ -74,7 +75,7 @@ func main() {
 	}
 
 	// Make sure the number of weeks is consistent across teams
-	nWeeks := int(0)
+	nWeeks = 0
 	for k, v := range probs {
 		if nWeeks == 0 {
 			nWeeks = len(v)
@@ -166,27 +167,27 @@ func main() {
 			_, ddw := maxFloat64(probs[ddt])
 
 			teamsAfterDD, _ := remainingTeams.CopyWithoutTeam(ddt)
-			probsAfterDD, _ := probs.CopyWithoutTeam(ddt)
 
 			pPerThread := math.MaxInt32
-			go permute(0, pPerThread, teamsAfterDD, probsAfterDD, ddt, ddw, results)
+			go permute(0, pPerThread, teamsAfterDD, probs, ddt, ddw, results)
 
 		}
 
 	} else {
 
-		nGoes = numCPU
-
-		// Divy up the permutations
-		permutator, err := permutation.NewPerm(remainingTeams, nil)
-
-		if err != nil {
-			fmt.Print("unable to create permutation of remaining teams")
-			os.Exit(-2)
+		// If there are more teams remaining than cores, then the number of permutations
+		// will always be divisible evenly by the remaining cores.  If not, then don't
+		// bother too much to try to fill all cores with goroutines, because your overhead
+		// is going to kill you anyway.
+		if len(remainingTeams) > numCPU {
+			nGoes = numCPU
+		} else {
+			nGoes = len(remainingTeams)
 		}
 
-		nPermutations := permutator.Left()
-		pPerThread := nPermutations / numCPU
+		// Divy up the permutations
+		nPermutations := intFactorial(len(remainingTeams))
+		pPerThread := nPermutations / nGoes
 
 		//wg := &sync.WaitGroup{}
 		//wg.Add(numCPU)
@@ -202,17 +203,10 @@ func main() {
 
 	//wg.Wait()
 	for i := 0; i < nGoes; i++ {
-		perm := <-results
-		if perm.ddweek >= 0 && perm.ddteam != "" {
-			perm.prob *= probs[perm.ddteam][perm.ddweek]
-		}
-		if perm.prob > bestPerm.prob {
-			bestPerm = perm
-			copy(bestPerm.perm, perm.perm)
-		}
+		bestPerm.UpdateGT(<-results)
 	}
 
-	fmt.Printf("Best: %v\n", bestPerm)
+	fmt.Printf("-----\nBest: %s\n", strings.Join(bestPerm.CSV(probs, nWeeks), ","))
 
 }
 
@@ -264,11 +258,8 @@ func parseSelection(teams []string, sel selection) []int {
 
 func maxFloat64(s []float64) (m float64, i int) {
 	i = -1
-	if len(s) > 0 {
-		i = 0
-		m = s[0]
-	}
-	for j, v := range s[1:] {
+	m = -math.MaxFloat64
+	for j, v := range s {
 		if v > m {
 			i = j
 			m = v
@@ -304,8 +295,15 @@ func permutationNext(data sort.Interface) bool {
 }
 
 func permute(i int, pPerThread int, remainingTeams selection, probs probabilityMap, ddteam string, ddweek int, results chan orderperm) {
+	startTime := float64(time.Now().UnixNano()) / 1000000000.
+
 	thisSel := make(selection, len(remainingTeams))
 	copy(thisSel, remainingTeams)
+
+	ddProb := 1.
+	if ddweek >= 0 {
+		ddProb = probs[ddteam][ddweek]
+	}
 
 	// skip!
 	for nSkip := 0; nSkip < pPerThread*i; nSkip++ {
@@ -317,15 +315,25 @@ func permute(i int, pPerThread int, remainingTeams selection, probs probabilityM
 	//fmt.Printf("%d Selection %v Prob (%f)\n", i, bestSel, bestProb)
 
 	for j := 0; j < pPerThread && permutationNext(thisSel); j++ {
+		thisTime := float64(time.Now().UnixNano()) / 1000000000.
 		//bc.Bars[i].Update(j)
 		totalProb, _ := probs.TotalProb(thisSel)
+		totalProb *= ddProb
 		if totalProb > bestPerm.prob {
 			bestPerm.prob = totalProb
 			copy(bestPerm.perm, thisSel)
-			fmt.Printf("%d,%d,%f,%s,%s,%d\n", i, j, bestPerm.prob, strings.Join(bestPerm.perm, ","), ddteam, ddweek)
+			fmt.Printf("%d,%d,%f,%s\n", i, j, thisTime-startTime, strings.Join(bestPerm.CSV(probs, nWeeks), ","))
 		}
 	}
 
 	results <- bestPerm
 	//wg.Done()
+}
+
+// Overflows when n > 15, so let's hope the B1G doesn't expand...
+func intFactorial(n int) int {
+	if n <= 1 {
+		return 1
+	}
+	return n * intFactorial(n-1)
 }
