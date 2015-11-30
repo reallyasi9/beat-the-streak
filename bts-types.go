@@ -3,11 +3,16 @@ package main
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
 // Convenience type, so I can parse a list of strings from the command line
-type selection []string
+type selection sort.StringSlice
+
+func (s selection) Len() int           { return len(s) }
+func (s selection) Less(i, j int) bool { return s[i] < s[j] }
+func (s selection) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // String method, part of the flag.Value interface
 func (s *selection) String() string {

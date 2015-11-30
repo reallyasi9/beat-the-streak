@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/fighterlyt/permutation"
-	//"github.com/sethgrid/multibar"
+	"github.com/sethgrid/multibar"
 	"io"
 	"os"
 	"runtime"
@@ -154,6 +154,7 @@ func main() {
 
 	// Divy up the permutations
 	permutator, err := permutation.NewPerm(remainingTeams, nil)
+
 	if err != nil {
 		fmt.Print("unable to create permutation of remaining teams")
 		os.Exit(-2)
@@ -163,54 +164,34 @@ func main() {
 	pPerThread := nPermutations / numCPU
 	wg := &sync.WaitGroup{}
 
-	wg.Add(3 /*numCPU*/)
-	go func() {
-		permutator, _ := permutation.NewPerm(remainingTeams, nil)
-		bestProb := 0.
-		bestSel := make(selection, len(remainingTeams))
-		copy(bestSel, permutator.NextN(0*pPerThread).(selection))
-		for p, err := permutator.Next(); err == nil && permutator.Index() < pPerThread; p, err = permutator.Next() {
-			totalProb, _ := probs.TotalProb(p.(selection))
-			if totalProb > bestProb {
-				bestProb = totalProb
-				copy(bestSel, p.(selection))
-				fmt.Printf("Selection %v Prob (%f)\n", bestSel, bestProb)
-			}
-		}
-		wg.Done()
-	}()
+	wg.Add(numCPU)
 
-	go func() {
-		permutator, _ := permutation.NewPerm(remainingTeams, nil)
-		bestProb := 0.
-		bestSel := make(selection, len(remainingTeams))
-		copy(bestSel, permutator.NextN(1*pPerThread).(selection))
-		for p, err := permutator.Next(); err == nil && permutator.Index() < pPerThread; p, err = permutator.Next() {
-			totalProb, _ := probs.TotalProb(p.(selection))
-			if totalProb > bestProb {
-				bestProb = totalProb
-				copy(bestSel, p.(selection))
-				fmt.Printf("Selection %v Prob (%f)\n", bestSel, bestProb)
-			}
-		}
-		wg.Done()
-	}()
+	for i := 0; i < numCPU; i++ {
+		go func(i int) {
+			thisSel := make(selection, len(remainingTeams))
+			copy(thisSel, remainingTeams)
 
-	go func() {
-		permutator, _ := permutation.NewPerm(remainingTeams, nil)
-		bestProb := 0.
-		bestSel := make(selection, len(remainingTeams))
-		copy(bestSel, permutator.NextN(2*pPerThread).(selection))
-		for p, err := permutator.Next(); err == nil && permutator.Index() < pPerThread; p, err = permutator.Next() {
-			totalProb, _ := probs.TotalProb(p.(selection))
-			if totalProb > bestProb {
-				bestProb = totalProb
-				copy(bestSel, p.(selection))
-				fmt.Printf("Selection %v Prob (%f)\n", bestSel, bestProb)
+			// skip!
+			for nSkip := 0; nSkip < pPerThread*i; nSkip++ {
+				permutationNext(thisSel)
 			}
-		}
-		wg.Done()
-	}()
+
+			bestProb, _ := probs.TotalProb(thisSel)
+			bestSel := make(selection, len(remainingTeams))
+			copy(bestSel, thisSel)
+			fmt.Printf("%d Selection %v Prob (%f)\n", i, bestSel, bestProb)
+
+			for j := 0; j < pPerThread && permutationNext(thisSel); j++ {
+				totalProb, _ := probs.TotalProb(thisSel)
+				if totalProb > bestProb {
+					bestProb = totalProb
+					copy(bestSel, thisSel)
+					fmt.Printf("%d Selection %v Prob (%f)\n", i, bestSel, bestProb)
+				}
+			}
+			wg.Done()
+		}(i)
+	}
 
 	wg.Wait()
 
@@ -275,4 +256,30 @@ func maxFloat64(s []float64) (m float64, i int) {
 		}
 	}
 	return m, i
+}
+
+// https://github.com/cznic/mathutil/blob/master/permute.go
+// Generate the next permutation of data if possible and return true.
+// Return false if there is no more permutation left.
+// Based on the algorithm described here:
+// http://en.wikipedia.org/wiki/Permutation#Generation_in_lexicographic_order
+func permutationNext(data sort.Interface) bool {
+	var k, l int
+	for k = data.Len() - 2; ; k-- { // 1.
+		if k < 0 {
+			return false
+		}
+
+		if data.Less(k, k+1) {
+			break
+		}
+	}
+	for l = data.Len() - 1; !data.Less(k, l); l-- { // 2.
+	}
+	data.Swap(k, l)                             // 3.
+	for i, j := k+1, data.Len()-1; i < j; i++ { // 4.
+		data.Swap(i, j)
+		j--
+	}
+	return true
 }
