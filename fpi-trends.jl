@@ -31,6 +31,7 @@ end
 # Stack on these to make the table long
 df = stack(df)
 rename!(df, [:value, :variable], [:fpi, :week])
+
 # Fix the week to be an integer
 function fixWeek(da::Vector{Symbol})
   result = DataArray(Int32, length(da))
@@ -41,31 +42,59 @@ function fixWeek(da::Vector{Symbol})
 end
 df[:week] = fixWeek(df[:week])
 
-# Spaghetti plot, B1G only
+# Stringify FPI for labeling
+function stringify(da::DataArray{Float64, 1})
+  result = DataArray(UTF8String, length(da))
+  for i in 1:length(da)
+    result[i] = string(da[i])
+  end
+  return result
+end
+df[:fpiString] = stringify(df[:fpi])
+
 const b1gTeams = UTF8String["Illinois", "Indiana", "Iowa", "Maryland", "Michigan", "Michigan State", "Minnesota", "Nebraska", "Northwestern", "OSU", "Penn State", "Purdue", "Rutgers", "Wisconsin"]
 const b1gColors = RGB[illiniOrange, hoosierCrimson, hawkeyeBlack, terrapinRed, wolverineBlue, spartanGreen, gopherMaroon, huskerScarlet, wildcatPurple, buckeyeGrey, lionBlue, boilermakerGold, knightScarlet, badgerRed]
 const b1gdf = @where(df, findin(:team, b1gTeams))
-const theme = Theme(background_color=colorant"white", key_position=:none)
+const theme = Theme(background_color=colorant"white",
+  key_position=:none,
+  grid_line_width=.85pt,
+  minor_label_font="Cantarell",
+  major_label_font="Cantarell"
+  )
 
-# Label the largest pre-post differences
-const spans = Dict{Float64, AbstractString}()
+# Label the deltas
+const b1gDeltas = DataFrame([UTF8String, Int32, Float64], [:team, :week, :delta], 0)
 for t in b1gTeams
-  span = @ix(df, (:team .== t) & (:week .== 14), :fpi)[1] - @ix(df, (:team .== t) & (:week .== 1), :fpi)[1]
-  spans[span] = t
+  for w in 1:13
+    delta = @ix(b1gdf, (:team .== t) & (:week .== w+1), :fpi)[1] - @ix(b1gdf, (:team .== t) & (:week .== w), :fpi)[1]
+    append!(b1gDeltas, DataFrame(team=UTF8String(t), week=Int32(w), delta=Float64(delta)))
+  end
 end
-const worstSpan = minimum(keys(spans))
-const worstSpanTeam = spans[worstSpan]
-const leftWorstSpan = @ix(df, (:team .== worstSpanTeam) & (:week .== 1), :fpi)[1]
-const rightWorstSpan = @ix(df, (:team .== worstSpanTeam) & (:week .== 14), :fpi)[1]
-const bestSpan = maximum(keys(spans))
-const bestSpanTeam = spans[worstSpan]
-const leftBestSpan = @ix(df, (:team .== bestSpanTeam) & (:week .== 1), :fpi)[1]
-const rightBestSpan = @ix(df, (:team .== bestSpanTeam) & (:week .== 14), :fpi)[1]
 
+# Spaghetti plot, B1G only
 p1 = plot(layer(b1gdf,
   Geom.line, x=:week, y=:fpi, color=:team),
   layer(@where(b1gdf, findin(:week, [1, 14])),
   Geom.label(hide_overlaps=false, position=:dynamic), x=:week, y=:fpi, label=:team),
+  layer(@where(b1gdf, findin(:week, [1, 14])),
+  Geom.label(hide_overlaps=false, position=:dynamic), x=:week, y=:fpi, label=:fpiString),
   theme,
   Scale.color_discrete_manual(b1gColors...; levels=b1gTeams))
-draw(PNG("fpi_spaghetti.png", 8inch, 6inch), p1)
+draw(SVG("fpi_spaghetti.svg", 8inch, 6inch), p1)
+
+# Deltas plots
+for t in b1gTeams
+  p2 = plot(@where(b1gDeltas, :team .== t),
+    Geom.line, Stat.step, x=:week, y=:delta, color=:team,
+    Geom.hline, yintercept=[0],
+    Guide.title("$t delta FPI"),
+    theme,
+    Scale.color_discrete_manual(b1gColors...; levels=b1gTeams))
+  draw(SVG("$(t)_delta.svg", 8inch, 3inch), p2)
+end
+
+p3 = plot(b1gDeltas,
+  Geom.boxplot, x=:team, y=:delta, color=:team,
+  theme,
+  Scale.color_discrete_manual(b1gColors...; levels=b1gTeams))
+draw(SVG("all_deltas.svg", 8inch, 3inch), p3)
