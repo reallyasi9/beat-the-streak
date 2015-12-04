@@ -58,8 +58,8 @@ const b1gdf = @where(df, findin(:team, b1gTeams))
 const theme = Theme(background_color=colorant"white",
   key_position=:none,
   grid_line_width=.85pt,
-  minor_label_font="Cantarell",
-  major_label_font="Cantarell"
+  minor_label_font="'Cantarell','Calibri',sans-serif",
+  major_label_font="'Cantarell','Calibri',sans-serif"
   )
 
 # Label the deltas
@@ -80,7 +80,7 @@ p1 = plot(layer(b1gdf,
   Geom.label(hide_overlaps=false, position=:dynamic), x=:week, y=:fpi, label=:fpiString),
   theme,
   Scale.color_discrete_manual(b1gColors...; levels=b1gTeams))
-draw(SVG("fpi_spaghetti.svg", 8inch, 6inch), p1)
+draw(SVG("fpi_spaghetti.svg", (10*golden)cm, 10cm), p1)
 
 # Deltas plots
 for t in b1gTeams
@@ -90,11 +90,35 @@ for t in b1gTeams
     Guide.title("$t delta FPI"),
     theme,
     Scale.color_discrete_manual(b1gColors...; levels=b1gTeams))
-  draw(SVG("$(t)_delta.svg", 8inch, 3inch), p2)
+  draw(SVG("$(t)_delta.svg", golden*10cm, 7cm), p2)
 end
 
 p3 = plot(b1gDeltas,
   Geom.boxplot, x=:team, y=:delta, color=:team,
   theme,
   Scale.color_discrete_manual(b1gColors...; levels=b1gTeams))
-draw(SVG("all_deltas.svg", 8inch, 3inch), p3)
+draw(SVG("all_deltas.svg", golden*10cm, 7cm), p3)
+
+# B1G+overall absolute plot (for Ron)
+const focuseddf = DataFrame(df)
+@byrow! focuseddf begin
+  if !in(:team, b1gTeams)
+    :team = "FBS"
+  end
+end
+
+p4 = plot(layer(df,
+  Geom.violin, x=:week, y=:fpi,
+  Geom.hline, yintercept=[0]),
+  layer(b1gdf,
+  Geom.violin, x=:week, y=:fpi),
+  theme)
+draw(SVG("fpi_distributions.svg", golden*10cm, 7cm), p4)
+
+p5 = plot(layer(df,
+  Geom.boxplot, x=:week, y=:fpi,
+  Geom.hline, yintercept=[0]),
+  layer(b1gdf,
+  Geom.boxplot, x=:week, y=:fpi),
+  theme)
+draw(SVG("fpi_boxes.svg", golden*10cm, 7cm), p5)
