@@ -22,6 +22,23 @@ var weekNumber = flag.Int("week", -1, "Week number (defaults to inferring from r
 var remainingTeams selection
 var nWeeks int
 
+var s2p = map[string]string{
+	"ILL":  "Illinois",
+	"IND":  "Indiana",
+	"IOWA": "Iowa",
+	"MICH": "Michigan",
+	"MSU":  "Michigan_State",
+	"MINN": "Minnesota",
+	"NEB":  "Nebraska",
+	"NU":   "Northwestern",
+	"OSU":  "OSU",
+	"PSU":  "Penn_State",
+	"PUR":  "Purdue",
+	"WISC": "Wisconsin",
+	"UMD":  "Maryland",
+	"RUT":  "Rutgers",
+}
+
 func init() {
 	flag.Var(&remainingTeams, "remaining", "comma-separated list of remaining teams")
 }
