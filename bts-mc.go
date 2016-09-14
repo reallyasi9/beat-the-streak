@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"reflect"
-	"time"
 	//"github.com/sethgrid/multibar"
 	"io"
 	"os"
@@ -17,15 +16,16 @@ import (
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
-var dataFile = flag.String("data", "", "CSV file containing probabilities of win")
-var remFile = flag.String("remaining", "", "CSV file containing picks remaining for each contestant")
-var weekNumber = flag.Int("week", -1, "Week number (defaults to inferring from remaining teams)")
+var dataFile = flag.String("probs", "", "CSV `file` containing probabilities of win")
+var remFile = flag.String("remaining", "", "CSV `file` containing picks remaining for each contestant")
+var weekNumber = flag.Int("week", -1, "Week `number` [1-13]")
 
 func main() {
 
 	pReader, rReader, err := parseFlags()
 
 	if err != nil {
+		flag.PrintDefaults()
 		fmt.Printf("error parsing flags: %s\n", err)
 		os.Exit(-1)
 	}
@@ -56,7 +56,14 @@ func main() {
 	teams := probs.Teams()
 
 	fmt.Printf("The following users have not yet been eliminated:\n%v\n", users)
-	fmt.Printf("The following users still have their double-down remaining:\n%v\n", ddusers)
+
+	var dduserSlice []string
+	for user, tf := range ddusers {
+		if tf {
+			dduserSlice = append(dduserSlice, user)
+		}
+	}
+	fmt.Printf("The following users still have their double-down remaining:\n%v\n", dduserSlice)
 
 	fmt.Printf("Teams: %v\n", teams)
 	fmt.Printf("Probabilities:\n%v\n", probs)
@@ -159,14 +166,15 @@ func main() {
 			bestPerm.UpdateGT(<-results)
 		}
 
-		fmt.Printf("%s: %s\n", user, bestPerm)
+		fmt.Printf("--%s--\n", user)
+		pb.PrintProbs(bestPerm)
 	}
 }
 
 func parseFlags() (*csv.Reader, *csv.Reader, error) {
 	flag.Parse()
 	if *dataFile == "" {
-		return nil, nil, fmt.Errorf("data flag required")
+		return nil, nil, fmt.Errorf("probs flag required")
 	}
 
 	if *remFile == "" {
@@ -365,7 +373,7 @@ func permutationNext(data sort.Interface) bool {
 }
 
 func permute(i int, pPerThread int, remainingTeams selection, probs probabilityMap, ddteam string, ddweek int, results chan orderPerm) {
-	startTime := float64(time.Now().UnixNano()) / 1000000000.
+	// startTime := float64(time.Now().UnixNano()) / 1000000000.
 
 	thisSel := make(selection, len(remainingTeams))
 	copy(thisSel, remainingTeams)
@@ -385,16 +393,16 @@ func permute(i int, pPerThread int, remainingTeams selection, probs probabilityM
 	//fmt.Printf("%d Selection %v Prob (%f)\n", i, bestSel, bestProb)
 
 	for j := 0; j < pPerThread && permutationNext(thisSel); j++ {
-		thisTime := float64(time.Now().UnixNano()) / 1000000000.
+		// thisTime := float64(time.Now().UnixNano()) / 1000000000.
 		//bc.Bars[i].Update(j)
 		totalProb, _ := probs.TotalProb(thisSel)
 		totalProb *= ddProb
 		if totalProb > bestPerm.prob {
 			bestPerm.prob = totalProb
-			copy(bestPerm.perm, thisSel)
+			bestPerm.perm = thisSel.clone()
 			bestPerm.ddteam = ddteam
 			bestPerm.ddweek = ddweek
-			fmt.Printf("%d,%d,%f,%f,%s\n", i, j, thisTime-startTime, totalProb, bestPerm)
+			// fmt.Printf("%d,%d,%f,%f,%s\n", i, j, thisTime-startTime, totalProb, bestPerm)
 		}
 	}
 

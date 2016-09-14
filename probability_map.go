@@ -49,6 +49,28 @@ func (p *probabilityMap) TotalProb(s selection) (float64, error) {
 	return prob, nil
 }
 
+func (p *probabilityMap) PrintProbs(o orderPerm) {
+	probs := make([]float64, len(o.perm))
+	fmt.Print("[")
+	for i, sel := range o.perm {
+		fmt.Printf(" %4s ", sel)
+		probs[i] = (*p)[sel][i]
+	}
+	fmt.Print("]")
+	if o.ddweek > 0 {
+		fmt.Printf(" %4s @ %d", o.ddteam, o.ddweek)
+	}
+	fmt.Print("\n ")
+	for _, pr := range probs {
+		fmt.Printf("%0.3f ", pr)
+	}
+	fmt.Print(" ")
+	if o.ddweek > 0 {
+		fmt.Printf("%0.3f", (*p)[o.ddteam][o.ddweek])
+	}
+	fmt.Printf(" = %f\n", o.prob)
+}
+
 func (p *probabilityMap) Teams() []string {
 	keys := make([]string, len(*p))
 
