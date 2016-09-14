@@ -4,6 +4,8 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"reflect"
+	"time"
 	//"github.com/sethgrid/multibar"
 	"io"
 	"os"
@@ -12,147 +14,53 @@ import (
 	"strconv"
 	//"sync"
 	"math"
-	"strings"
-	"time"
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
 var dataFile = flag.String("data", "", "CSV file containing probabilities of win")
+var remFile = flag.String("remaining", "", "CSV file containing picks remaining for each contestant")
 var weekNumber = flag.Int("week", -1, "Week number (defaults to inferring from remaining teams)")
-var remainingTeams selection
-var nWeeks int
-
-var s2p = map[string]string{
-	"ILL":  "Illinois",
-	"IND":  "Indiana",
-	"IOWA": "Iowa",
-	"MICH": "Michigan",
-	"MSU":  "Michigan_State",
-	"MINN": "Minnesota",
-	"NEB":  "Nebraska",
-	"NU":   "Northwestern",
-	"OSU":  "OSU",
-	"PSU":  "Penn_State",
-	"PUR":  "Purdue",
-	"WISC": "Wisconsin",
-	"UMD":  "Maryland",
-	"RUT":  "Rutgers",
-}
-
-func init() {
-	flag.Var(&remainingTeams, "remaining", "comma-separated list of remaining teams")
-}
 
 func main() {
 
-	reader, err := parseFlags()
+	pReader, rReader, err := parseFlags()
 
 	if err != nil {
-		fmt.Printf("error parsing flags : %s\n", err)
+		fmt.Printf("error parsing flags: %s\n", err)
 		os.Exit(-1)
 	}
 
-	// Throw away the first row (headers)
-	_, err = reader.Read()
+	// Parse out the probabilities
+	probs, err := parseProbs(pReader)
 	if err != nil {
-		fmt.Printf("error reading first row : %s\n", err)
+		fmt.Printf("error parsing probability file: %s\n", err)
 		os.Exit(-1)
 	}
 
-	// Parse remaining data and store it
-	var teams []string
-	probs := make(probabilityMap)
-	for {
-		row, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			fmt.Printf("error reading data : %s\n", err)
-			os.Exit(-1)
-		}
-
-		if len(row) == 0 {
-			break
-		}
-
-		team, prob, err := parseRow(row)
-		if err != nil {
-			fmt.Printf("error parsing row : %s\n", err)
-			os.Exit(-1)
-		}
-
-		teams = append(teams, team)
-		probs[team] = prob
-	}
-
-	if len(teams) != len(probs) {
-		fmt.Printf("error parsing data : %d teams != %d rows\n", len(teams), len(probs))
+	// Parse out the remaining teams
+	remaining, err := parseRemaining(rReader)
+	if err != nil {
+		fmt.Printf("error parsing remaining file: %s\n", err)
 		os.Exit(-1)
 	}
 
-	// Make sure the number of weeks is consistent across teams
-	nWeeks = 0
-	for k, v := range probs {
-		if nWeeks == 0 {
-			nWeeks = len(v)
-			continue
-		}
-		if len(v) != nWeeks {
-			fmt.Printf("error parsing data : weeks for team %s (%d) does not match other teams (%d)\n", k, len(v), nWeeks)
-			os.Exit(-1)
-		}
-	}
-
-	// Can't be predicting past the end of the season
-	if *weekNumber > nWeeks {
-		fmt.Printf("error parsing week : only %d weeks in data, week %d requested\n", nWeeks, *weekNumber)
+	// You can have at most 1 more team remaining than weeks remaining, but can
+	// never have fewer than that.
+	ddusers, err := remaining.TrimUsers(*weekNumber)
+	if err != nil {
+		fmt.Printf("error trimming users: %s\n", err)
 		os.Exit(-1)
 	}
 
-	// Default remaining teams to all teams
-	if len(remainingTeams) == 0 {
-		remainingTeams = teams
-	}
+	users := remaining.Users()
+	teams := probs.Teams()
 
-	// Infer week number
-	doubleDown := false
-	if *weekNumber <= 0 {
-		if len(remainingTeams) <= len(teams)-2 {
-			fmt.Println("warning : inferring week number may miss double-down selection, specify week flag to fix")
-		}
-		if len(remainingTeams) == 1 {
-			doubleDown = false
-			*weekNumber = nWeeks
-		} else {
-			*weekNumber = len(teams) - len(remainingTeams) + 1
-			doubleDown = true
-		}
-	} else {
-		if len(remainingTeams) > nWeeks-*weekNumber+2 {
-			fmt.Printf("error parsing remaining : not enough weeks remaining (%d) to use remaining teams (%d)\n", nWeeks-*weekNumber+1, len(remainingTeams))
-			os.Exit(-1)
-		}
-		if len(remainingTeams) < nWeeks-*weekNumber+1 {
-			fmt.Printf("error parsing remaining : not enough teams remaining (%d) to fill remaining weeks (%d)\n", len(remainingTeams), nWeeks-*weekNumber+1)
-			os.Exit(-1)
-		}
-		if len(remainingTeams) == nWeeks-*weekNumber+2 {
-			doubleDown = true
-		}
-	}
+	fmt.Printf("The following users have not yet been eliminated:\n%v\n", users)
+	fmt.Printf("The following users still have their double-down remaining:\n%v\n", ddusers)
 
-	fmt.Printf("CPUs: %d\ndataFile: %s\nremainingTeams: %s\n",
-		numCPU, *dataFile, remainingTeams)
 	fmt.Printf("Teams: %v\n", teams)
-	fmt.Printf("nWeeks: %d\nweekNumber: %d\ndoubleDown: %v\n", nWeeks, *weekNumber, doubleDown)
 	fmt.Printf("Probabilities:\n%v\n", probs)
 
-	err = probs.KeepTeams(remainingTeams)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(-1)
-	}
 	err = probs.FilterWeeks(*weekNumber)
 	if err != nil {
 		fmt.Println(err)
@@ -162,88 +70,130 @@ func main() {
 	fmt.Printf("Filtered Probabilities:\n%v\n", probs)
 
 	// Here we go.
-
-	// For permutations to work properly, these should be sorted
-	sort.Strings(remainingTeams)
-
-	// This is the best I can do
-	var bestPerm orderperm
-
-	// These are the results from my goroutines
-	results := make(chan orderperm)
-
-	// I could make this more complicated by closing the channel, but I will instead just count the goroutines
-	var nGoes int
-
-	if doubleDown {
-
-		nGoes = len(remainingTeams)
-
-		// Each dd team gets its own goroutine
-		for _, ddt := range remainingTeams {
-			_, ddw := maxFloat64(probs[ddt])
-
-			teamsAfterDD, _ := remainingTeams.CopyWithoutTeam(ddt)
-
-			pPerThread := math.MaxInt32
-			go permute(0, pPerThread, teamsAfterDD, probs, ddt, ddw, results)
-
+	// Find the unique remaining teams.
+	uniqueUsers := make(map[string]selection)
+	for u, r := range remaining {
+		if len(uniqueUsers) == 0 {
+			uniqueUsers[u] = r
+			continue
 		}
 
-	} else {
+		found := false
+		for uu, ur := range uniqueUsers {
+			if reflect.DeepEqual(r, ur) {
+				fmt.Printf("%s <- %s are the same\n", uu, u)
+				found = true
+				break
+			}
+		}
 
-		// If there are more teams remaining than cores, then the number of permutations
-		// will always be divisible evenly by the remaining cores.  If not, then don't
-		// bother too much to try to fill all cores with goroutines, because your overhead
-		// is going to kill you anyway.
-		if len(remainingTeams) > numCPU {
-			nGoes = numCPU
-		} else {
+		if !found {
+			uniqueUsers[u] = r
+		}
+	}
+
+	// Loop through the unique users
+	for user, remainingTeams := range uniqueUsers {
+
+		pb, err := probs.CopyWithTeams(remainingTeams)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(-1)
+		}
+
+		// For permutations to work properly, these should be sorted
+		sort.Strings(remainingTeams)
+
+		// This is the best I can do
+		var bestPerm orderPerm
+
+		// These are the results from my goroutines
+		results := make(chan orderPerm)
+
+		// I could make this more complicated by closing the channel, but I will instead just count the goroutines
+		var nGoes int
+
+		if ddusers[user] {
 			nGoes = len(remainingTeams)
+
+			// Each dd team gets its own goroutine
+			for _, ddt := range remainingTeams {
+				_, ddw := maxFloat64(pb[ddt])
+
+				teamsAfterDD, _ := remainingTeams.CopyWithoutTeam(ddt)
+
+				pPerThread := math.MaxInt32
+				go permute(0, pPerThread, teamsAfterDD, pb, ddt, ddw, results)
+
+			}
+
+		} else {
+
+			// If there are more teams remaining than cores, then the number of permutations
+			// will always be divisible evenly by the remaining cores.  If not, then don't
+			// bother too much to try to fill all cores with goroutines, because your overhead
+			// is going to kill you anyway.
+			if len(remainingTeams) > numCPU {
+				nGoes = numCPU
+			} else {
+				nGoes = len(remainingTeams)
+			}
+
+			// Divy up the permutations
+			nPermutations := intFactorial(len(remainingTeams))
+			pPerThread := nPermutations / nGoes
+
+			//wg := &sync.WaitGroup{}
+			//wg.Add(numCPU)
+
+			//bc, _ := multibar.New()
+			//go bc.Listen()
+
+			for i := 0; i < nGoes; i++ {
+				//bc.MakeBar(pPerThread, fmt.Sprintf("permutations %d/%d", i+1, numCPU))
+				go permute(i, pPerThread, remainingTeams, probs, "", -1, results)
+			}
 		}
-
-		// Divy up the permutations
-		nPermutations := intFactorial(len(remainingTeams))
-		pPerThread := nPermutations / nGoes
-
-		//wg := &sync.WaitGroup{}
-		//wg.Add(numCPU)
-
-		//bc, _ := multibar.New()
-		//go bc.Listen()
 
 		for i := 0; i < nGoes; i++ {
-			//bc.MakeBar(pPerThread, fmt.Sprintf("permutations %d/%d", i+1, numCPU))
-			go permute(i, pPerThread, remainingTeams, probs, "", -1, results)
+			bestPerm.UpdateGT(<-results)
 		}
+
+		fmt.Printf("%s: %s\n", user, bestPerm)
 	}
-
-	//wg.Wait()
-	for i := 0; i < nGoes; i++ {
-		bestPerm.UpdateGT(<-results)
-	}
-
-	fmt.Printf("-----\nBest: %s\n", strings.Join(bestPerm.CSV(probs, nWeeks), ","))
-
 }
 
-func parseFlags() (*csv.Reader, error) {
+func parseFlags() (*csv.Reader, *csv.Reader, error) {
 	flag.Parse()
 	if *dataFile == "" {
-		return nil, fmt.Errorf("data flag required")
+		return nil, nil, fmt.Errorf("data flag required")
+	}
+
+	if *remFile == "" {
+		return nil, nil, fmt.Errorf("remaining flag required")
+	}
+
+	if *weekNumber < 1 || *weekNumber > 13 {
+		return nil, nil, fmt.Errorf("week number must be specified and must be in the range [1,13]")
 	}
 
 	csvFile, err := os.Open(*dataFile)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	//defer csvFile.Close()
-	reader := csv.NewReader(csvFile)
-	return reader, err
+	pReader := csv.NewReader(csvFile)
+
+	csvFile2, err := os.Open(*remFile)
+	if err != nil {
+		return pReader, nil, err
+	}
+	rReader := csv.NewReader(csvFile2)
+
+	return pReader, rReader, nil
 }
 
 // Slices are passed by reference
-func parseRow(row []string) (string, []float64, error) {
+func parseProbRow(row []string) (string, []float64, error) {
 	var err error
 	team := row[0]
 	probs := make([]float64, len(row)-1)
@@ -259,18 +209,121 @@ func parseRow(row []string) (string, []float64, error) {
 	return team, probs, nil
 }
 
-func parseSelection(teams []string, sel selection) []int {
-	teamMap := make(map[string]int)
-	for i, s := range teams {
-		teamMap[s] = i
+func parseRemRow(row []string) (string, []bool, error) {
+	//var err error
+	team := row[0]
+	rem := make([]bool, len(row)-2)
+	for i, val := range row[1 : len(row)-1] {
+		if val == team {
+			rem[i] = true
+		} else if val != "" {
+			// Done now
+			//err = fmt.Errorf("unrecognized team remaining in row %v: %s", i, val)
+			return team, rem, nil
+		}
+		// defaults to false
+	}
+	return team, rem, nil
+}
+
+func parseProbs(r *csv.Reader) (probabilityMap, error) {
+
+	// Throw away the first row (week numbers)
+	_, err := r.Read()
+	if err != nil {
+		fmt.Printf("error reading week numbers: %s\n", err)
+		os.Exit(-1)
 	}
 
-	selected := make([]int, len(sel))
-	for i, s := range sel {
-		selected[i] = teamMap[s]
+	// Parse remaining data and store it
+	var teams []string
+	p := make(probabilityMap)
+	row, err := r.Read()
+	for ; err != io.EOF; row, err = r.Read() {
+		if err != nil {
+			return nil, err
+		}
+
+		if len(row) == 0 {
+			break
+		}
+
+		team, prob, e := parseProbRow(row)
+		if e != nil {
+			return nil, e
+		}
+
+		teams = append(teams, team)
+		p[team] = prob
 	}
 
-	return selected
+	if len(teams) != len(p) {
+		err = fmt.Errorf("error parsing data : %d teams != %d rows, meaning a team was repeated in the probability file", len(teams), len(p))
+		return nil, err
+	}
+
+	// Make sure the number of weeks is consistent across teams
+	nWeeks := 0
+	for k, v := range p {
+		if nWeeks == 0 {
+			nWeeks = len(v)
+			continue
+		}
+		if len(v) != nWeeks {
+			err = fmt.Errorf("error parsing data : weeks for team %s (%d) does not match other teams (%d)\n", k, len(v), nWeeks)
+			return nil, err
+		}
+	}
+
+	return p, nil
+}
+
+func parseRemaining(r *csv.Reader) (remainingMap, error) {
+
+	// The first row are the contestents
+	row, err := r.Read()
+	if err != nil {
+		e := fmt.Errorf("error reading users: %s\n", err)
+		return nil, e
+	}
+
+	users := row[1 : len(row)-1]
+
+	// Eject the next row as it is a relic of times past
+	r.Read()
+
+	// Parse remaining data and store it
+	rem := make(remainingMap)
+	row, err = r.Read()
+	for ; err != io.EOF; row, err = r.Read() {
+		if err != nil {
+			return nil, err
+		}
+
+		if len(row) < len(users)+2 {
+			// There's a row at the end that is not useful
+			break
+		}
+
+		team, remaining, e := parseRemRow(row)
+		if e != nil {
+			return nil, e
+		}
+
+		for i, userRem := range remaining {
+			if userRem {
+				rem[users[i]] = append(rem[users[i]], team)
+			}
+		}
+
+	}
+
+	if len(users) != len(rem) {
+		err = fmt.Errorf("error parsing data : %d users != %d rows, meaning a user was repeated in the remaining file", len(users), len(rem))
+		return nil, err
+	}
+
+	return rem, nil
 }
 
 func maxFloat64(s []float64) (m float64, i int) {
@@ -311,7 +364,7 @@ func permutationNext(data sort.Interface) bool {
 	return true
 }
 
-func permute(i int, pPerThread int, remainingTeams selection, probs probabilityMap, ddteam string, ddweek int, results chan orderperm) {
+func permute(i int, pPerThread int, remainingTeams selection, probs probabilityMap, ddteam string, ddweek int, results chan orderPerm) {
 	startTime := float64(time.Now().UnixNano()) / 1000000000.
 
 	thisSel := make(selection, len(remainingTeams))
@@ -328,7 +381,7 @@ func permute(i int, pPerThread int, remainingTeams selection, probs probabilityM
 	}
 
 	bestProb, _ := probs.TotalProb(thisSel)
-	bestPerm := orderperm{bestProb, thisSel, ddteam, ddweek}
+	bestPerm := orderPerm{bestProb, thisSel, ddteam, ddweek}
 	//fmt.Printf("%d Selection %v Prob (%f)\n", i, bestSel, bestProb)
 
 	for j := 0; j < pPerThread && permutationNext(thisSel); j++ {
@@ -339,7 +392,9 @@ func permute(i int, pPerThread int, remainingTeams selection, probs probabilityM
 		if totalProb > bestPerm.prob {
 			bestPerm.prob = totalProb
 			copy(bestPerm.perm, thisSel)
-			fmt.Printf("%d,%d,%f,%s\n", i, j, thisTime-startTime, strings.Join(bestPerm.CSV(probs, nWeeks), ","))
+			bestPerm.ddteam = ddteam
+			bestPerm.ddweek = ddweek
+			fmt.Printf("%d,%d,%f,%f,%s\n", i, j, thisTime-startTime, totalProb, bestPerm)
 		}
 	}
 
