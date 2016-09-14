@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-type remainingMap map[string][]string
+type remainingMap map[string]selection
 
 func (r *remainingMap) TrimUsers(w int) (map[string]bool, error) {
 	// Users can have up to 1 more team than weeks availible, but not fewer

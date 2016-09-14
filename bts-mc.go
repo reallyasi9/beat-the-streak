@@ -4,7 +4,6 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
-	"reflect"
 	//"github.com/sethgrid/multibar"
 	"io"
 	"os"
@@ -87,7 +86,7 @@ func main() {
 
 		found := false
 		for uu, ur := range uniqueUsers {
-			if reflect.DeepEqual(r, ur) {
+			if r.equals(ur) {
 				fmt.Printf("%s <- %s are the same\n", uu, u)
 				found = true
 				break

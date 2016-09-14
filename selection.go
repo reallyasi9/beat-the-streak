@@ -20,6 +20,21 @@ func (s *selection) clone() selection {
 	return out
 }
 
+// Perform a deep equals
+func (s selection) equals(other selection) bool {
+	if len(s) != len(other) {
+		return false
+	}
+	sort.Strings(s)
+	sort.Strings(other)
+	for i := range s {
+		if s[i] != other[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // Filter a single team from the selection
 func (s *selection) CopyWithoutTeam(t string) (selection, error) {
 	out := make(selection, len(*s))
