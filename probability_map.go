@@ -67,6 +67,8 @@ func (p *probabilityMap) PrintProbs(o orderPerm) {
 	fmt.Print(" ")
 	if o.ddweek > 0 {
 		fmt.Printf("%0.3f", (*p)[o.ddteam][o.ddweek])
+	} else {
+		fmt.Print("     ")
 	}
 	fmt.Printf(" = %f\n", o.prob)
 }
