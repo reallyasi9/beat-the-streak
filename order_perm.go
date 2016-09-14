@@ -12,7 +12,7 @@ type orderPerm struct {
 
 func (o orderPerm) String() string {
 	if o.ddweek > 0 {
-		return fmt.Sprintf("%s %s @ %d Prob %f", o.perm, o.ddteam, o.ddweek, o.prob)
+		return fmt.Sprintf("%s %s @ %d Prob %f", o.perm, o.ddteam, o.ddweek+1, o.prob)
 	}
 	return fmt.Sprintf("%s Prob %f", o.perm, o.prob)
 }

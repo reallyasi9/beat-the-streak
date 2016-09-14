@@ -58,7 +58,7 @@ func (p *probabilityMap) PrintProbs(o orderPerm) {
 	}
 	fmt.Print("]")
 	if o.ddweek > 0 {
-		fmt.Printf(" %4s @ %d", o.ddteam, o.ddweek)
+		fmt.Printf(" %4s @ %d", o.ddteam, o.ddweek+1)
 	}
 	fmt.Print("\n ")
 	for _, pr := range probs {
