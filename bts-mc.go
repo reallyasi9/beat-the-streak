@@ -77,24 +77,13 @@ func main() {
 
 	// Here we go.
 	// Find the unique remaining teams.
-	uniqueUsers := make(map[string]selection)
-	for u, r := range remaining {
-		if len(uniqueUsers) == 0 {
-			uniqueUsers[u] = r
-			continue
-		}
-
-		found := false
-		for uu, ur := range uniqueUsers {
-			if r.equals(ur) {
-				fmt.Printf("%s <- %s are the same\n", uu, u)
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			uniqueUsers[u] = r
+	uniqueUsers, uniques := remaining.UniqueUsers()
+	fmt.Println("The following users are clones of one another:")
+	for uu, ou := range uniques {
+		if len(ou) == 0 {
+			fmt.Printf("%s (unique)\n", uu)
+		} else {
+			fmt.Printf("%s cloned by %s\n", uu, ou)
 		}
 	}
 
@@ -165,7 +154,12 @@ func main() {
 			bestPerm.UpdateGT(<-results)
 		}
 
-		fmt.Printf("--%s--\n", user)
+		fmt.Printf("-- %s ", user)
+		if len(uniques[user]) == 0 {
+			fmt.Print("(unique)\n")
+		} else {
+			fmt.Printf("cloned by %s\n", uniques[user])
+		}
 		pb.PrintProbs(bestPerm)
 	}
 }

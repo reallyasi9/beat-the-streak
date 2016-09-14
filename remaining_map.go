@@ -36,3 +36,24 @@ func (r *remainingMap) Users() []string {
 
 	return keys
 }
+
+// Determine unique users and who they mirror within a map
+func (r *remainingMap) UniqueUsers() (remainingMap, map[string][]string) {
+	out := make(map[string][]string)
+Loop:
+	for u, s := range *r {
+		// TODO: use a sorted tree for faster lookup of equality
+		for u2 := range out {
+			if s.equals((*r)[u2]) {
+				out[u2] = append(out[u2], u)
+				continue Loop
+			}
+		}
+		out[u] = make([]string, 0)
+	}
+	rout := remainingMap{}
+	for u := range out {
+		rout[u] = (*r)[u]
+	}
+	return rout, out
+}
