@@ -81,9 +81,9 @@ func main() {
 	fmt.Println("The following users are clones of one another:")
 	for uu, ou := range uniques {
 		if len(ou) == 0 {
-			fmt.Printf("%s (unique)\n", uu)
+			fmt.Printf("%s (unique)\n%v\n", uu, uniqueUsers[uu])
 		} else {
-			fmt.Printf("%s cloned by %s\n", uu, ou)
+			fmt.Printf("%s cloned by %s\n%v\n", uu, ou, uniqueUsers[uu])
 		}
 	}
 
@@ -213,8 +213,8 @@ func parseProbRow(row []string) (string, []float64, error) {
 func parseRemRow(row []string) (string, []bool, error) {
 	//var err error
 	team := row[0]
-	rem := make([]bool, len(row)-2)
-	for i, val := range row[1 : len(row)-1] {
+	rem := make([]bool, len(row)-1)
+	for i, val := range row[1 : len(row)] {
 		if val == team {
 			rem[i] = true
 		} else if val != "" {
@@ -287,11 +287,7 @@ func parseRemaining(r *csv.Reader) (remainingMap, error) {
 		e := fmt.Errorf("error reading users: %s\n", err)
 		return nil, e
 	}
-
-	users := row[1 : len(row)-1]
-
-	// Eject the next row as it is a relic of times past
-	r.Read()
+	users := row[1 : len(row)]
 
 	// Parse remaining data and store it
 	rem := make(remainingMap)
@@ -301,9 +297,9 @@ func parseRemaining(r *csv.Reader) (remainingMap, error) {
 			return nil, err
 		}
 
-		if len(row) < len(users)+2 {
-			// There's a row at the end that is not useful
-			break
+		if len(row) < len(users)+1 {
+		  err = fmt.Errorf("error parsing data : %d users, but row has %d non-index columns", len(row)-1, len(users))
+		  return nil, err
 		}
 
 		team, remaining, e := parseRemRow(row)
@@ -320,7 +316,7 @@ func parseRemaining(r *csv.Reader) (remainingMap, error) {
 	}
 
 	if len(users) != len(rem) {
-		err = fmt.Errorf("error parsing data : %d users != %d rows, meaning a user was repeated in the remaining file", len(users), len(rem))
+		err = fmt.Errorf("error parsing data : %d users != %d columns, meaning a user was repeated in the remaining file", len(users), len(rem))
 		return nil, err
 	}
 
