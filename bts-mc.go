@@ -4,6 +4,10 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+
+	yaml "gopkg.in/yaml.v2"
 	//"github.com/sethgrid/multibar"
 	"io"
 	"os"
@@ -15,13 +19,13 @@ import (
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
-var dataFile = flag.String("probs", "", "CSV `file` containing probabilities of win")
-var remFile = flag.String("remaining", "", "CSV `file` containing picks remaining for each contestant")
+var probUrl = flag.String("p", "", "`URL` or filename of Sagarin ratings for calculating probabilities of win")
+var remFile = flag.String("r", "", "YAML `file` containing picks remaining for each contestant")
 var weekNumber = flag.Int("week", -1, "Week `number` [1-13]")
 
 func main() {
 
-	pReader, rReader, err := parseFlags()
+	probsText, playerMap, err := parseFlags()
 
 	if err != nil {
 		flag.PrintDefaults()
@@ -30,14 +34,14 @@ func main() {
 	}
 
 	// Parse out the probabilities
-	probs, err := parseProbs(pReader)
+	probs, err := parseProbs(probsText)
 	if err != nil {
 		fmt.Printf("error parsing probability file: %s\n", err)
 		os.Exit(-1)
 	}
 
 	// Parse out the remaining teams
-	remaining, err := parseRemaining(rReader)
+	remaining, err := parseRemaining(playerMap)
 	if err != nil {
 		fmt.Printf("error parsing remaining file: %s\n", err)
 		os.Exit(-1)
@@ -164,9 +168,16 @@ func main() {
 	}
 }
 
-func parseFlags() (*csv.Reader, *csv.Reader, error) {
+type playerMap map[string]player
+
+type player struct {
+	Teams      []string
+	DoubleDown bool
+}
+
+func parseFlags() ([]byte, playerMap, error) {
 	flag.Parse()
-	if *dataFile == "" {
+	if *probUrl == "" {
 		return nil, nil, fmt.Errorf("probs flag required")
 	}
 
@@ -178,19 +189,28 @@ func parseFlags() (*csv.Reader, *csv.Reader, error) {
 		return nil, nil, fmt.Errorf("week number must be specified and must be in the range [1,13]")
 	}
 
-	csvFile, err := os.Open(*dataFile)
+	resp, err := http.Get(*probUrl)
 	if err != nil {
 		return nil, nil, err
 	}
-	pReader := csv.NewReader(csvFile)
-
-	csvFile2, err := os.Open(*remFile)
+	defer resp.Body.Close()
+	probBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return pReader, nil, err
+		return nil, nil, err
 	}
-	rReader := csv.NewReader(csvFile2)
 
-	return pReader, rReader, nil
+	remYaml, err := ioutil.ReadFile(*remFile)
+	if err != nil {
+		return probBody, nil, err
+	}
+
+	pm := playerMap{}
+	err = yaml.Unmarshal(remYaml, &pm)
+	if err != nil {
+		return probBody, nil, err
+	}
+
+	return probBody, pm, nil
 }
 
 // Slices are passed by reference
@@ -214,7 +234,7 @@ func parseRemRow(row []string) (string, []bool, error) {
 	//var err error
 	team := row[0]
 	rem := make([]bool, len(row)-1)
-	for i, val := range row[1 : len(row)] {
+	for i, val := range row[1:len(row)] {
 		if val == team {
 			rem[i] = true
 		} else if val != "" {
@@ -227,7 +247,7 @@ func parseRemRow(row []string) (string, []bool, error) {
 	return team, rem, nil
 }
 
-func parseProbs(r *csv.Reader) (probabilityMap, error) {
+func parseProbs(r []byte) (probabilityMap, error) {
 
 	// Throw away the first row (week numbers)
 	_, err := r.Read()
@@ -287,7 +307,7 @@ func parseRemaining(r *csv.Reader) (remainingMap, error) {
 		e := fmt.Errorf("error reading users: %s\n", err)
 		return nil, e
 	}
-	users := row[1 : len(row)]
+	users := row[1:len(row)]
 
 	// Parse remaining data and store it
 	rem := make(remainingMap)
@@ -298,8 +318,8 @@ func parseRemaining(r *csv.Reader) (remainingMap, error) {
 		}
 
 		if len(row) < len(users)+1 {
-		  err = fmt.Errorf("error parsing data : %d users, but row has %d non-index columns", len(row)-1, len(users))
-		  return nil, err
+			err = fmt.Errorf("error parsing data : %d users, but row has %d non-index columns", len(row)-1, len(users))
+			return nil, err
 		}
 
 		team, remaining, e := parseRemRow(row)

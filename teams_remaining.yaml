@@ -1,0 +1,6 @@
+Person 1:
+    teams: [AAA, BBB, CCC]
+    doubleDown: false
+Person 2:
+    teams: [AAA, CCC, DDD, EEE]
+    doubleDown: true
