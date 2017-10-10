@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"regexp"
 
 	yaml "gopkg.in/yaml.v2"
 	//"github.com/sethgrid/multibar"
@@ -183,6 +184,31 @@ func main() {
 		}
 		pb.PrintProbs(bestPerm)
 	}
+}
+
+func makeRatings(url string, teams []string) (map[string]float64, float64, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, 0., err
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0., err
+	}
+
+	homeRegex := regexp.MustCompile("HOME ADVANTAGE=\\[<[^>]+>\\s+([\\-0-9.])<")
+	homeAdvStr := homeRegex.Find(body)
+	if homeAdvStr == nil {
+		return nil, 0., fmt.Errorf("unable to parse home advantage from %s", url)
+	}
+	homeAdv, err := strconv.ParseFloat(string(homeAdvStr), 64)
+	if err != nil {
+		return nil, 0., err
+	}
+
+	ratingsRegex := regexp.MustCompile("<font color=\"#000000\">\\s+\\d+\\s+(.*?)\\s+[A]+\\s*=<.*?<font color=\"#0000ff\">\\s*([\\-0-9.]+)")
+
 }
 
 type playerMap map[string]player
