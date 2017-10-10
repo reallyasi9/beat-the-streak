@@ -19,33 +19,50 @@ import (
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
-var probUrl = flag.String("p", "", "`URL` or filename of Sagarin ratings for calculating probabilities of win")
-var remFile = flag.String("r", "", "YAML `file` containing picks remaining for each contestant")
+var b1gTeams = map[string]string{
+	"Illinois":       "ILL",
+	"Indiana":        "IND",
+	"Iowa":           "IOWA",
+	"Maryland":       "UMD",
+	"Michigan":       "MICH",
+	"Michigan State": "MSU",
+	"Minnesota":      "MINN",
+	"Nebraska":       "NEB",
+	"Northwestern":   "NU",
+	"Ohio State":     "OSU",
+	"Penn State":     "PSU",
+	"Purdue":         "PUR",
+	"Rutgers":        "RUT",
+	"Wisconsin":      "WISC"}
+var ratingsUrl = flag.String("ratings",
+	"http://sagarin.com/sports/cfsend.htm",
+	"`URL` of Sagarin ratings for calculating probabilities of win")
+var performanceUrl = flag.String("performance",
+	"http://www.thepredictiontracker.com/ncaaresults.php",
+	"`URL` of model performances for calculating probabilities of win")
+var scheduleUrl = flag.String("schedule",
+	"http://www.espn.com/college-football/conferences/schedule/_/id/5/big-ten-conference",
+	"`URL` of B1G schedule")
+var remainingFile = flag.String("remaining", "remaining.yaml", "YAML `file` containing picks remaining for each contestant")
 var weekNumber = flag.Int("week", -1, "Week `number` [1-13]")
 
+func init() {
+	flag.StringVar(ratingsUrl, "r", "http://sagarin.com/sports/cfsend.htm", "`URL` of Sagarin ratings for calculating probabilities of win")
+	flag.StringVar(performanceUrl, "p", "http://www.thepredictiontracker.com/ncaaresults.php", "`URL` of model performances for calculating probabilities of win")
+	flag.StringVar(scheduleUrl, "s", "http://www.espn.com/college-football/conferences/schedule/_/id/5/big-ten-conference",
+		"`URL` of B1G schedule")
+	flag.StringVar(remainingFile, "e", "remaining.yaml", "YAML `file` containing picks remaining for each contestant")
+	flag.IntVar(weekNumber, "w", -1, "Week `number` [1-13]")
+}
+
 func main() {
+	flag.Parse()
 
-	probsText, playerMap, err := parseFlags()
-
-	if err != nil {
-		flag.PrintDefaults()
-		fmt.Printf("error parsing flags: %s\n", err)
-		os.Exit(-1)
-	}
-
-	// Parse out the probabilities
-	probs, err := parseProbs(probsText)
-	if err != nil {
-		fmt.Printf("error parsing probability file: %s\n", err)
-		os.Exit(-1)
-	}
-
-	// Parse out the remaining teams
-	remaining, err := parseRemaining(playerMap)
-	if err != nil {
-		fmt.Printf("error parsing remaining file: %s\n", err)
-		os.Exit(-1)
-	}
+	ratings, err := makeRatings(*ratingsUrl, b1gTeams)
+	stdDev, err := scrapeStdDev(*performanceUrl, "Sagarin Points")
+	schedule, err := makeSchedule(*scheduleUrl, b1gTeams)
+	probs, err := ratings.makeProbabilities(schedule, stdDev)
+	players, err := makePlayers(*remainingFile, weekNumber)
 
 	// You can have at most 1 more team remaining than weeks remaining, but can
 	// never have fewer than that.
