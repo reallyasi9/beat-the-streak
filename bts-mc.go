@@ -1,16 +1,17 @@
 package main
 
 import (
-	"encoding/csv"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"regexp"
 
+	"github.com/atgjack/prob"
+
 	yaml "gopkg.in/yaml.v2"
 	//"github.com/sethgrid/multibar"
-	"io"
+
 	"os"
 	"runtime"
 	"sort"
@@ -35,35 +36,50 @@ var b1gTeams = map[string]string{
 	"Purdue":         "PUR",
 	"Rutgers":        "RUT",
 	"Wisconsin":      "WISC"}
-var ratingsUrl = flag.String("ratings",
+var ratingsURL = flag.String("ratings",
 	"http://sagarin.com/sports/cfsend.htm",
 	"`URL` of Sagarin ratings for calculating probabilities of win")
-var performanceUrl = flag.String("performance",
+var performanceURL = flag.String("performance",
 	"http://www.thepredictiontracker.com/ncaaresults.php",
 	"`URL` of model performances for calculating probabilities of win")
-var scheduleUrl = flag.String("schedule",
-	"http://www.espn.com/college-football/conferences/schedule/_/id/5/big-ten-conference",
-	"`URL` of B1G schedule")
+var scheduleFile = flag.String("schedule",
+	"schedule.yaml",
+	"YAML `file` containing B1G schedule")
 var remainingFile = flag.String("remaining", "remaining.yaml", "YAML `file` containing picks remaining for each contestant")
 var weekNumber = flag.Int("week", -1, "Week `number` [1-13]")
 
 func init() {
-	flag.StringVar(ratingsUrl, "r", "http://sagarin.com/sports/cfsend.htm", "`URL` of Sagarin ratings for calculating probabilities of win")
-	flag.StringVar(performanceUrl, "p", "http://www.thepredictiontracker.com/ncaaresults.php", "`URL` of model performances for calculating probabilities of win")
-	flag.StringVar(scheduleUrl, "s", "http://www.espn.com/college-football/conferences/schedule/_/id/5/big-ten-conference",
-		"`URL` of B1G schedule")
+	flag.StringVar(ratingsURL, "r", "http://sagarin.com/sports/cfsend.htm", "`URL` of Sagarin ratings for calculating probabilities of win")
+	flag.StringVar(performanceURL, "p", "http://www.thepredictiontracker.com/ncaaresults.php", "`URL` of model performances for calculating probabilities of win")
+	flag.StringVar(scheduleFile, "s", "schedule.yaml", "YAML `file` containing B1G schedule")
 	flag.StringVar(remainingFile, "e", "remaining.yaml", "YAML `file` containing picks remaining for each contestant")
 	flag.IntVar(weekNumber, "w", -1, "Week `number` [1-13]")
+}
+
+func checkErr(err error) {
+	if err != nil {
+		panic(err)
+	}
 }
 
 func main() {
 	flag.Parse()
 
-	ratings, err := makeRatings(*ratingsUrl, b1gTeams)
-	stdDev, err := scrapeStdDev(*performanceUrl, "Sagarin Points")
-	schedule, err := makeSchedule(*scheduleUrl, b1gTeams)
-	probs, err := ratings.makeProbabilities(schedule, stdDev)
-	players, err := makePlayers(*remainingFile, weekNumber)
+	ratings, err := makeRatings(*ratingsURL)
+	checkErr(err)
+	fmt.Println(ratings)
+	bias, stdDev, err := scrapeParameters(*performanceURL, "Sagarin Points")
+	checkErr(err)
+	fmt.Println(bias, stdDev)
+	schedule, err := makeSchedule(*scheduleFile)
+	checkErr(err)
+	fmt.Println(schedule)
+	probs, err := ratings.makeProbabilities(schedule, bias, stdDev)
+	checkErr(err)
+	fmt.Println(probs)
+	remaining, err := makePlayers(*remainingFile)
+	checkErr(err)
+	fmt.Println(remaining)
 
 	// You can have at most 1 more team remaining than weeks remaining, but can
 	// never have fewer than that.
@@ -186,74 +202,140 @@ func main() {
 	}
 }
 
-func makeRatings(url string, teams []string) (map[string]float64, float64, error) {
+func getURLBody(url string) ([]byte, error) {
 	resp, err := http.Get(url)
 	if err != nil {
-		return nil, 0., err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, 0., err
+		return nil, err
+	}
+	return body, nil
+}
+
+type ratings map[string]float64
+
+func (r ratings) makeProbabilities(s schedule, bias float64, stdDev float64) (probabilityMap, error) {
+	normal := prob.Normal{Mu: 0, Sigma: stdDev}
+
+	p := make(probabilityMap)
+
+	for team1, sched := range s {
+		p[team1] = make([]float64, 13)
+		rating1, ok := r[team1]
+		if !ok {
+			return nil, fmt.Errorf("team %s not in ratings", team1)
+		}
+		for i, team2 := range sched {
+			if team2 == "" {
+				p[team1][i] = 0.
+				continue
+			}
+			t2home := team2[0] == '@'
+			if t2home {
+				team2 = string(team2[1:])
+			}
+			rating2, ok := r[team2]
+			if !ok {
+				return nil, fmt.Errorf("team %s (opponent of %s in week %d) not in ratings", team2, team1, i+1)
+			}
+			spread := rating1 - rating2
+			if t2home {
+				spread -= bias
+			}
+			p[team1][i] = normal.Cdf(spread)
+		}
 	}
 
-	homeRegex := regexp.MustCompile("HOME ADVANTAGE=\\[<[^>]+>\\s+([\\-0-9.])<")
-	homeAdvStr := homeRegex.Find(body)
-	if homeAdvStr == nil {
-		return nil, 0., fmt.Errorf("unable to parse home advantage from %s", url)
-	}
-	homeAdv, err := strconv.ParseFloat(string(homeAdvStr), 64)
+	return p, nil
+}
+
+func makeRatings(url string) (ratings, error) {
+	body, err := getURLBody(url)
 	if err != nil {
-		return nil, 0., err
+		return nil, err
 	}
 
 	ratingsRegex := regexp.MustCompile("<font color=\"#000000\">\\s+\\d+\\s+(.*?)\\s+[A]+\\s*=<.*?<font color=\"#0000ff\">\\s*([\\-0-9.]+)")
+	ratingsStr := ratingsRegex.FindAllStringSubmatch(string(body), -1)
+	if ratingsStr == nil {
+		return nil, fmt.Errorf("unable to parse any ratings from %s", url)
+	}
 
+	r := make(ratings)
+	for _, matches := range ratingsStr {
+		rval, err := strconv.ParseFloat(matches[2], 64)
+		if err != nil {
+			return nil, err
+		}
+		r[matches[1]] = rval
+	}
+
+	return r, nil
 }
 
-type playerMap map[string]player
+func scrapeParameters(url string, modelName string) (float64, float64, error) {
+	body, err := getURLBody(url)
+	if err != nil {
+		return 0., 0., err
+	}
 
-type player struct {
-	Teams      []string
-	DoubleDown bool
+	perfRegex := regexp.MustCompile(fmt.Sprintf("%s</font>.*?>[\\-0-9.]+<.*?>[\\-0-9.]+<.*?>[\\-0-9.]+<.*?>([\\-0-9.]+)<.*?>([\\-0-9.]+)<", modelName))
+	perfStr := perfRegex.FindSubmatch(body)
+	if perfStr == nil {
+		return 0., 0., fmt.Errorf("unable to parse bais and mean squared error for model %s from %s", modelName, url)
+	}
+	bias, err := strconv.ParseFloat(string(perfStr[1]), 64)
+	if err != nil {
+		return 0., 0., err
+	}
+	mse, err := strconv.ParseFloat(string(perfStr[2]), 64)
+	if err != nil {
+		return 0., 0., err
+	}
+	std := math.Sqrt(mse - bias*bias)
+	return bias, std, nil
 }
 
-func parseFlags() ([]byte, playerMap, error) {
-	flag.Parse()
-	if *probUrl == "" {
-		return nil, nil, fmt.Errorf("probs flag required")
-	}
+type schedule map[string][]string
 
-	if *remFile == "" {
-		return nil, nil, fmt.Errorf("remaining flag required")
-	}
+func makeSchedule(fileName string) (schedule, error) {
 
-	if *weekNumber < 1 || *weekNumber > 13 {
-		return nil, nil, fmt.Errorf("week number must be specified and must be in the range [1,13]")
-	}
-
-	resp, err := http.Get(*probUrl)
+	schedYaml, err := ioutil.ReadFile(fileName)
 	if err != nil {
-		return nil, nil, err
-	}
-	defer resp.Body.Close()
-	probBody, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	remYaml, err := ioutil.ReadFile(*remFile)
+	s := make(schedule)
+	err = yaml.Unmarshal(schedYaml, s)
 	if err != nil {
-		return probBody, nil, err
+		return nil, err
 	}
 
-	pm := playerMap{}
-	err = yaml.Unmarshal(remYaml, &pm)
-	if err != nil {
-		return probBody, nil, err
+	for k, v := range s {
+		if len(v) != 13 {
+			return nil, fmt.Errorf("schedule for team %s incorrect: expected %d, got %d", k, 13, len(v))
+		}
 	}
 
-	return probBody, pm, nil
+	return s, nil
+}
+
+func makePlayers(playerFile string) (remainingMap, error) {
+	playerYaml, err := ioutil.ReadFile(playerFile)
+	if err != nil {
+		return nil, err
+	}
+
+	rm := make(remainingMap)
+	err = yaml.Unmarshal(playerYaml, rm)
+	if err != nil {
+		return nil, err
+	}
+
+	return rm, nil
 }
 
 // Slices are passed by reference
@@ -288,102 +370,6 @@ func parseRemRow(row []string) (string, []bool, error) {
 		// defaults to false
 	}
 	return team, rem, nil
-}
-
-func parseProbs(r []byte) (probabilityMap, error) {
-
-	// Throw away the first row (week numbers)
-	_, err := r.Read()
-	if err != nil {
-		fmt.Printf("error reading week numbers: %s\n", err)
-		os.Exit(-1)
-	}
-
-	// Parse remaining data and store it
-	var teams []string
-	p := make(probabilityMap)
-	row, err := r.Read()
-	for ; err != io.EOF; row, err = r.Read() {
-		if err != nil {
-			return nil, err
-		}
-
-		if len(row) == 0 {
-			break
-		}
-
-		team, prob, e := parseProbRow(row)
-		if e != nil {
-			return nil, e
-		}
-
-		teams = append(teams, team)
-		p[team] = prob
-	}
-
-	if len(teams) != len(p) {
-		err = fmt.Errorf("error parsing data : %d teams != %d rows, meaning a team was repeated in the probability file", len(teams), len(p))
-		return nil, err
-	}
-
-	// Make sure the number of weeks is consistent across teams
-	nWeeks := 0
-	for k, v := range p {
-		if nWeeks == 0 {
-			nWeeks = len(v)
-			continue
-		}
-		if len(v) != nWeeks {
-			err = fmt.Errorf("error parsing data : weeks for team %s (%d) does not match other teams (%d)\n", k, len(v), nWeeks)
-			return nil, err
-		}
-	}
-
-	return p, nil
-}
-
-func parseRemaining(r *csv.Reader) (remainingMap, error) {
-
-	// The first row are the contestents
-	row, err := r.Read()
-	if err != nil {
-		e := fmt.Errorf("error reading users: %s\n", err)
-		return nil, e
-	}
-	users := row[1:len(row)]
-
-	// Parse remaining data and store it
-	rem := make(remainingMap)
-	row, err = r.Read()
-	for ; err != io.EOF; row, err = r.Read() {
-		if err != nil {
-			return nil, err
-		}
-
-		if len(row) < len(users)+1 {
-			err = fmt.Errorf("error parsing data : %d users, but row has %d non-index columns", len(row)-1, len(users))
-			return nil, err
-		}
-
-		team, remaining, e := parseRemRow(row)
-		if e != nil {
-			return nil, e
-		}
-
-		for i, userRem := range remaining {
-			if userRem {
-				rem[users[i]] = append(rem[users[i]], team)
-			}
-		}
-
-	}
-
-	if len(users) != len(rem) {
-		err = fmt.Errorf("error parsing data : %d users != %d columns, meaning a user was repeated in the remaining file", len(users), len(rem))
-		return nil, err
-	}
-
-	return rem, nil
 }
 
 func maxFloat64(s []float64) (m float64, i int) {

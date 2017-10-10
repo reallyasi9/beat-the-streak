@@ -1,6 +1,2 @@
-Person 1:
-    teams: [AAA, BBB, CCC]
-    doubleDown: false
-Person 2:
-    teams: [AAA, CCC, DDD, EEE]
-    doubleDown: true
+Person 1: [AAA, BBB, CCC]
+Person 2: [AAA, CCC, DDD, EEE]

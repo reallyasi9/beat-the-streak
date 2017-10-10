@@ -53,12 +53,12 @@ func (p *probabilityMap) PrintProbs(o orderPerm) {
 	probs := make([]float64, len(o.perm))
 	fmt.Print("[")
 	for i, sel := range o.perm {
-		fmt.Printf(" %4s ", sel)
+		fmt.Printf(" %4s ", b1gTeams[sel])
 		probs[i] = (*p)[sel][i]
 	}
 	fmt.Print("]")
 	if o.ddweek >= 0 {
-		fmt.Printf(" %4s @ %d", o.ddteam, o.ddweek+1)
+		fmt.Printf(" %4s @ %d", b1gTeams[o.ddteam], o.ddweek+1)
 	}
 	fmt.Print("\n ")
 	for _, pr := range probs {
