@@ -67,19 +67,14 @@ func main() {
 
 	ratings, err := makeRatings(*ratingsURL)
 	checkErr(err)
-	fmt.Println(ratings)
 	bias, stdDev, err := scrapeParameters(*performanceURL, "Sagarin Points")
 	checkErr(err)
-	fmt.Println(bias, stdDev)
 	schedule, err := makeSchedule(*scheduleFile)
 	checkErr(err)
-	fmt.Println(schedule)
 	probs, err := ratings.makeProbabilities(schedule, bias, stdDev)
 	checkErr(err)
-	fmt.Println(probs)
 	remaining, err := makePlayers(*remainingFile)
 	checkErr(err)
-	fmt.Println(remaining)
 
 	// You can have at most 1 more team remaining than weeks remaining, but can
 	// never have fewer than that.
@@ -234,7 +229,10 @@ func (r ratings) makeProbabilities(s schedule, bias float64, stdDev float64) (pr
 				continue
 			}
 			t2home := team2[0] == '@'
-			if t2home {
+			t2close := team2[0] == '>'
+			t1close := team2[0] == '<'
+			neutral := team2[0] == '!'
+			if t2home || t2close || t1close || neutral {
 				team2 = string(team2[1:])
 			}
 			rating2, ok := r[team2]
@@ -244,6 +242,12 @@ func (r ratings) makeProbabilities(s schedule, bias float64, stdDev float64) (pr
 			spread := rating1 - rating2
 			if t2home {
 				spread -= bias
+			} else if t2close {
+				spread -= bias / 2
+			} else if t1close {
+				spread += bias / 2
+			} else if !neutral {
+				spread += bias
 			}
 			p[team1][i] = normal.Cdf(spread)
 		}
