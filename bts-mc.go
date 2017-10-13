@@ -245,13 +245,10 @@ func (r ratings) makeProbabilities(s schedule, bias, stdDev, penalty float64) (p
 			rawp := normal.Cdf(spread)
 			capp := rawp
 			if rawp > penalty && penalty != 1. {
-				// Above penalty, the distribution is quadratic, matching value and slope to the y=x diagonal.
-				denom := math.Pow(penalty-1., 2.)
-				ps := math.Pow(penalty, 2.)
-				a := -1. / denom
-				b := (ps + 1.) / denom
-				c := -ps / denom
-				capp = a*rawp*rawp + b*rawp + c
+				// Above penalty, the distribution is linear, matching value to the y=x diagonal.
+				denom := penalty - 1
+				b := penalty / denom
+				capp = b*rawp - b
 			}
 			p[team1][i] = capp
 		}
