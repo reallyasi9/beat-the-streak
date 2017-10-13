@@ -10,14 +10,12 @@ import (
 	"github.com/atgjack/prob"
 
 	yaml "gopkg.in/yaml.v2"
-	//"github.com/sethgrid/multibar"
 
+	"math"
 	"os"
 	"runtime"
 	"sort"
 	"strconv"
-	//"sync"
-	"math"
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
@@ -164,14 +162,7 @@ func main() {
 			nPermutations := intFactorial(len(remainingTeams))
 			pPerThread := nPermutations / nGoes
 
-			//wg := &sync.WaitGroup{}
-			//wg.Add(numCPU)
-
-			//bc, _ := multibar.New()
-			//go bc.Listen()
-
 			for i := 0; i < nGoes; i++ {
-				//bc.MakeBar(pPerThread, fmt.Sprintf("permutations %d/%d", i+1, numCPU))
 				go permute(i, pPerThread, remainingTeams, probs, "", -1, results)
 			}
 		}
@@ -341,40 +332,6 @@ func makePlayers(playerFile string) (remainingMap, error) {
 	}
 
 	return rm, nil
-}
-
-// Slices are passed by reference
-func parseProbRow(row []string) (string, []float64, error) {
-	var err error
-	team := row[0]
-	probs := make([]float64, len(row)-1)
-	for i, rec := range row[1:] {
-		if rec == "#N/A" {
-			continue // defaults to zero
-		}
-		probs[i], err = strconv.ParseFloat(rec, 64)
-		if err != nil {
-			return team, probs, err
-		}
-	}
-	return team, probs, nil
-}
-
-func parseRemRow(row []string) (string, []bool, error) {
-	//var err error
-	team := row[0]
-	rem := make([]bool, len(row)-1)
-	for i, val := range row[1:len(row)] {
-		if val == team {
-			rem[i] = true
-		} else if val != "" {
-			// Done now
-			//err = fmt.Errorf("unrecognized team remaining in row %v: %s", i, val)
-			return team, rem, nil
-		}
-		// defaults to false
-	}
-	return team, rem, nil
 }
 
 func maxFloat64(s []float64) (m float64, i int) {
