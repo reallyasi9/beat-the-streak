@@ -47,14 +47,7 @@ var scheduleFile = flag.String("schedule",
 	"YAML `file` containing B1G schedule")
 var remainingFile = flag.String("remaining", "remaining.yaml", "YAML `file` containing picks remaining for each contestant")
 var weekNumber = flag.Int("week", -1, "Week `number` [1-13]")
-
-func init() {
-	flag.StringVar(ratingsURL, "r", "http://sagarin.com/sports/cfsend.htm", "`URL` of Sagarin ratings for calculating probabilities of win")
-	flag.StringVar(performanceURL, "p", "http://www.thepredictiontracker.com/ncaaresults.php", "`URL` of model performances for calculating probabilities of win")
-	flag.StringVar(scheduleFile, "s", "schedule.yaml", "YAML `file` containing B1G schedule")
-	flag.StringVar(remainingFile, "e", "remaining.yaml", "YAML `file` containing picks remaining for each contestant")
-	flag.IntVar(weekNumber, "w", -1, "Week `number` [1-13]")
-}
+var penalty = flag.Float64("penalty", 1.0, "Penalty `probability` where to begin a linear penalty (to avoid high-probability games in accordance with the tiebreaker rules)")
 
 func checkErr(err error) {
 	if err != nil {
@@ -71,7 +64,7 @@ func main() {
 	checkErr(err)
 	schedule, err := makeSchedule(*scheduleFile)
 	checkErr(err)
-	probs, err := ratings.makeProbabilities(schedule, bias, stdDev)
+	probs, err := ratings.makeProbabilities(schedule, bias, stdDev, *penalty)
 	checkErr(err)
 	remaining, err := makePlayers(*remainingFile)
 	checkErr(err)
@@ -212,7 +205,7 @@ func getURLBody(url string) ([]byte, error) {
 
 type ratings map[string]float64
 
-func (r ratings) makeProbabilities(s schedule, bias float64, stdDev float64) (probabilityMap, error) {
+func (r ratings) makeProbabilities(s schedule, bias, stdDev, penalty float64) (probabilityMap, error) {
 	normal := prob.Normal{Mu: 0, Sigma: stdDev}
 
 	p := make(probabilityMap)
@@ -249,7 +242,18 @@ func (r ratings) makeProbabilities(s schedule, bias float64, stdDev float64) (pr
 			} else if !neutral {
 				spread += bias
 			}
-			p[team1][i] = normal.Cdf(spread)
+			rawp := normal.Cdf(spread)
+			capp := rawp
+			if rawp > penalty && penalty != 1. {
+				// Above penalty, the distribution is quadratic, matching value and slope to the y=x diagonal.
+				denom := math.Pow(penalty-1., 2.)
+				ps := math.Pow(penalty, 2.)
+				a := -1. / denom
+				b := (ps + 1.) / denom
+				c := -ps / denom
+				capp = a*rawp*rawp + b*rawp + c
+			}
+			p[team1][i] = capp
 		}
 	}
 
