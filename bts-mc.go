@@ -3,19 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"regexp"
-
-	"github.com/atgjack/prob"
-
-	yaml "gopkg.in/yaml.v2"
 
 	"math"
 	"os"
 	"runtime"
 	"sort"
-	"strconv"
+
+	"./bts"
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
@@ -56,13 +50,13 @@ func checkErr(err error) {
 func main() {
 	flag.Parse()
 
-	ratings, err := makeRatings(*ratingsURL)
+	ratings, err := bts.MakeRatings(*ratingsURL)
 	checkErr(err)
-	bias, stdDev, err := scrapeParameters(*performanceURL, "Sagarin Points")
+	bias, stdDev, err := bts.ScrapeParameters(*performanceURL, "Sagarin Points")
 	checkErr(err)
-	schedule, err := makeSchedule(*scheduleFile)
+	schedule, err := bts.MakeSchedule(*scheduleFile)
 	checkErr(err)
-	probs, err := ratings.makeProbabilities(schedule, bias, stdDev, *penalty)
+	probs, err := ratings.MakeProbabilities(schedule, bias, stdDev, *penalty)
 	checkErr(err)
 	remaining, err := makePlayers(*remainingFile)
 	checkErr(err)
@@ -179,241 +173,4 @@ func main() {
 		}
 		pb.PrintProbs(bestPerm)
 	}
-}
-
-func getURLBody(url string) ([]byte, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	return body, nil
-}
-
-type ratings map[string]float64
-
-func (r ratings) makeProbabilities(s schedule, bias, stdDev, penalty float64) (probabilityMap, error) {
-	normal := prob.Normal{Mu: 0, Sigma: stdDev}
-
-	p := make(probabilityMap)
-
-	for team1, sched := range s {
-		p[team1] = make([]float64, 13)
-		rating1, ok := r[team1]
-		if !ok {
-			return nil, fmt.Errorf("team %s not in ratings", team1)
-		}
-		for i, team2 := range sched {
-			if team2 == "" {
-				p[team1][i] = 0.
-				continue
-			}
-			t2home := team2[0] == '@'
-			t2close := team2[0] == '>'
-			t1close := team2[0] == '<'
-			neutral := team2[0] == '!'
-			if t2home || t2close || t1close || neutral {
-				team2 = string(team2[1:])
-			}
-			rating2, ok := r[team2]
-			if !ok {
-				return nil, fmt.Errorf("team %s (opponent of %s in week %d) not in ratings", team2, team1, i+1)
-			}
-			spread := rating1 - rating2
-			if t2home {
-				spread -= bias
-			} else if t2close {
-				spread -= bias / 2
-			} else if t1close {
-				spread += bias / 2
-			} else if !neutral {
-				spread += bias
-			}
-			rawp := normal.Cdf(spread)
-			capp := rawp
-			if rawp > penalty && penalty != 1. {
-				// Above penalty, the distribution is linear, matching value to the y=x diagonal.
-				denom := penalty - 1
-				b := penalty / denom
-				capp = b*rawp - b
-			}
-			p[team1][i] = capp
-		}
-	}
-
-	return p, nil
-}
-
-func makeRatings(url string) (ratings, error) {
-	body, err := getURLBody(url)
-	if err != nil {
-		return nil, err
-	}
-
-	ratingsRegex := regexp.MustCompile("<font color=\"#000000\">\\s+\\d+\\s+(.*?)\\s+[A]+\\s*=<.*?<font color=\"#0000ff\">\\s*([\\-0-9.]+)")
-	ratingsStr := ratingsRegex.FindAllStringSubmatch(string(body), -1)
-	if ratingsStr == nil {
-		return nil, fmt.Errorf("unable to parse any ratings from %s", url)
-	}
-
-	r := make(ratings)
-	for _, matches := range ratingsStr {
-		rval, err := strconv.ParseFloat(matches[2], 64)
-		if err != nil {
-			return nil, err
-		}
-		r[matches[1]] = rval
-	}
-
-	return r, nil
-}
-
-func scrapeParameters(url string, modelName string) (float64, float64, error) {
-	body, err := getURLBody(url)
-	if err != nil {
-		return 0., 0., err
-	}
-
-	perfRegex := regexp.MustCompile(fmt.Sprintf("%s</font>.*?>[\\-0-9.]+<.*?>[\\-0-9.]+<.*?>[\\-0-9.]+<.*?>([\\-0-9.]+)<.*?>([\\-0-9.]+)<", modelName))
-	perfStr := perfRegex.FindSubmatch(body)
-	if perfStr == nil {
-		return 0., 0., fmt.Errorf("unable to parse bais and mean squared error for model %s from %s", modelName, url)
-	}
-	bias, err := strconv.ParseFloat(string(perfStr[1]), 64)
-	if err != nil {
-		return 0., 0., err
-	}
-	mse, err := strconv.ParseFloat(string(perfStr[2]), 64)
-	if err != nil {
-		return 0., 0., err
-	}
-	std := math.Sqrt(mse - bias*bias)
-	return bias, std, nil
-}
-
-type schedule map[string][]string
-
-func makeSchedule(fileName string) (schedule, error) {
-
-	schedYaml, err := ioutil.ReadFile(fileName)
-	if err != nil {
-		return nil, err
-	}
-
-	s := make(schedule)
-	err = yaml.Unmarshal(schedYaml, s)
-	if err != nil {
-		return nil, err
-	}
-
-	for k, v := range s {
-		if len(v) != 13 {
-			return nil, fmt.Errorf("schedule for team %s incorrect: expected %d, got %d", k, 13, len(v))
-		}
-	}
-
-	return s, nil
-}
-
-func makePlayers(playerFile string) (remainingMap, error) {
-	playerYaml, err := ioutil.ReadFile(playerFile)
-	if err != nil {
-		return nil, err
-	}
-
-	rm := make(remainingMap)
-	err = yaml.Unmarshal(playerYaml, rm)
-	if err != nil {
-		return nil, err
-	}
-
-	return rm, nil
-}
-
-func maxFloat64(s []float64) (m float64, i int) {
-	i = -1
-	m = -math.MaxFloat64
-	for j, v := range s {
-		if v > m {
-			i = j
-			m = v
-		}
-	}
-	return m, i
-}
-
-// https://github.com/cznic/mathutil/blob/master/permute.go
-// Generate the next permutation of data if possible and return true.
-// Return false if there is no more permutation left.
-// Based on the algorithm described here:
-// http://en.wikipedia.org/wiki/Permutation#Generation_in_lexicographic_order
-func permutationNext(data sort.Interface) bool {
-	var k, l int
-	for k = data.Len() - 2; ; k-- { // 1.
-		if k < 0 {
-			return false
-		}
-
-		if data.Less(k, k+1) {
-			break
-		}
-	}
-	for l = data.Len() - 1; !data.Less(k, l); l-- { // 2.
-	}
-	data.Swap(k, l)                             // 3.
-	for i, j := k+1, data.Len()-1; i < j; i++ { // 4.
-		data.Swap(i, j)
-		j--
-	}
-	return true
-}
-
-func permute(i int, pPerThread int, remainingTeams selection, probs probabilityMap, ddteam string, ddweek int, results chan orderPerm) {
-	// startTime := float64(time.Now().UnixNano()) / 1000000000.
-
-	thisSel := make(selection, len(remainingTeams))
-	copy(thisSel, remainingTeams)
-
-	ddProb := 1.
-	if ddweek >= 0 {
-		ddProb = probs[ddteam][ddweek]
-	}
-
-	// skip!
-	for nSkip := 0; nSkip < pPerThread*i; nSkip++ {
-		permutationNext(thisSel)
-	}
-
-	bestProb, _ := probs.TotalProb(thisSel)
-	bestPerm := orderPerm{bestProb, thisSel, ddteam, ddweek}
-	//fmt.Printf("%d Selection %v Prob (%f)\n", i, bestSel, bestProb)
-
-	for j := 0; j < pPerThread && permutationNext(thisSel); j++ {
-		// thisTime := float64(time.Now().UnixNano()) / 1000000000.
-		//bc.Bars[i].Update(j)
-		totalProb, _ := probs.TotalProb(thisSel)
-		totalProb *= ddProb
-		if totalProb > bestPerm.prob {
-			bestPerm.prob = totalProb
-			bestPerm.perm = thisSel.clone()
-			bestPerm.ddteam = ddteam
-			bestPerm.ddweek = ddweek
-			// fmt.Printf("%d,%d,%f,%f,%s\n", i, j, thisTime-startTime, totalProb, bestPerm)
-		}
-	}
-
-	results <- bestPerm
-	//wg.Done()
-}
-
-// Overflows when n > 15, so let's hope the B1G doesn't expand...
-func intFactorial(n int) int {
-	if n <= 1 {
-		return 1
-	}
-	return n * intFactorial(n-1)
 }
