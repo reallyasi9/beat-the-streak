@@ -7,7 +7,7 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-type Schedule map[string][]string
+type Schedule map[Team][]Team
 
 func MakeSchedule(fileName string) (Schedule, error) {
 

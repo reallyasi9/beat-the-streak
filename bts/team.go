@@ -1,9 +1,6 @@
 package bts
 
-type Team struct {
-	Name        string
-	Probability float64
-}
+type Team string
 
 // TeamList implements the sort.Interface interface and represents a list of Teams.
 type TeamList []Team
@@ -15,7 +12,7 @@ func (t TeamList) Len() int {
 
 // Less reports whether (implements sort.Interface interface)
 func (t TeamList) Less(i, j int) bool {
-	return t[i].Name < t[j].Name
+	return t[i] < t[j]
 }
 
 // Swap swaps the elements with indexes i and j (implements sort.Interface interface)
@@ -31,11 +28,20 @@ func (t TeamList) Clone() TeamList {
 	return out
 }
 
-// Probability just multiplies out probabilities
-func (t TeamList) Probability() float64 {
-	p := 1.
-	for _, team := range t {
-		p *= team.Probability
+// Probabilities returns the probabilities of the team list for the given order
+func (t TeamList) Probabilities(p Probabilities) []float64 {
+	out := make([]float64, len(t))
+	for i, team := range t {
+		out[i] = p[team][i]
 	}
-	return p
+	return out
+}
+
+// Probability just multiplies out probabilities
+func (t TeamList) Probability(p Probabilities) float64 {
+	prob := 1.
+	for i, team := range t {
+		prob *= p[team][i]
+	}
+	return prob
 }

@@ -26,7 +26,7 @@ func Permute(s TeamList, c chan<- TeamList) {
 
 	// First permutation: self
 	out := s.Clone()
-	c <- out
+	c <- out.Clone()
 
 	count := make([]int, out.Len())
 
@@ -38,7 +38,7 @@ func Permute(s TeamList, c chan<- TeamList) {
 			} else {
 				out.Swap(count[i], i)
 			}
-			c <- out
+			c <- out.Clone()
 			count[i]++
 			i = 0
 		} else {
@@ -46,4 +46,22 @@ func Permute(s TeamList, c chan<- TeamList) {
 			i++
 		}
 	}
+}
+
+func MapSlice(s []string) map[string]bool {
+	m := make(map[string]bool)
+	for _, st := range s {
+		m[st] = true
+	}
+	return m
+}
+
+func SliceMap(m map[string]bool) []string {
+	a := make([]string, 0)
+	for k, v := range m {
+		if v {
+			a = append(a, k)
+		}
+	}
+	return a
 }

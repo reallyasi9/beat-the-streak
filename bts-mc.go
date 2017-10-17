@@ -3,11 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 
-	"math"
-	"os"
 	"runtime"
-	"sort"
 
 	"./bts"
 )
@@ -41,136 +39,108 @@ var remainingFile = flag.String("remaining", "remaining.yaml", "YAML `file` cont
 var weekNumber = flag.Int("week", -1, "Week `number` [1-13]")
 var penalty = flag.Float64("penalty", 1.0, "Penalty `probability` where to begin a linear penalty (to avoid high-probability games in accordance with the tiebreaker rules)")
 
-func checkErr(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
-
 func main() {
 	flag.Parse()
 
 	ratings, err := bts.MakeRatings(*ratingsURL)
-	checkErr(err)
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("Downloaded ratings %v", ratings)
+
 	bias, stdDev, err := bts.ScrapeParameters(*performanceURL, "Sagarin Points")
-	checkErr(err)
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("Scraped bias %f, standard dev %f", bias, stdDev)
+
 	schedule, err := bts.MakeSchedule(*scheduleFile)
-	checkErr(err)
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("Made schedule %v", schedule)
+
 	probs, err := ratings.MakeProbabilities(schedule, bias, stdDev, *penalty)
-	checkErr(err)
-	remaining, err := makePlayers(*remainingFile)
-	checkErr(err)
-
-	// You can have at most 1 more team remaining than weeks remaining, but can
-	// never have fewer than that.
-	ddusers, err := remaining.TrimUsers(*weekNumber)
 	if err != nil {
-		fmt.Printf("error trimming users: %s\n", err)
-		os.Exit(-1)
+		panic(err)
 	}
+	log.Printf("Made probabilities %v", probs)
 
-	users := remaining.Users()
-	teams := probs.Teams()
+	players, err := bts.MakePlayers(*remainingFile)
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("Made players %v", players)
 
-	fmt.Printf("The following users have not yet been eliminated:\n%v\n", users)
-
-	var dduserSlice []string
-	for user, tf := range ddusers {
-		if tf {
-			dduserSlice = append(dduserSlice, user)
+	// Determine week number, if needed
+	if *weekNumber == -1 {
+		week, err2 := players.InferWeek()
+		if err2 != nil {
+			panic(err2)
 		}
+		*weekNumber = week
 	}
-	fmt.Printf("The following users still have their double-down remaining:\n%v\n", dduserSlice)
+	log.Printf("Week number %d", *weekNumber)
 
-	fmt.Printf("Teams: %v\n", teams)
-	fmt.Printf("Probabilities:\n%v\n", probs)
-
-	err = probs.FilterWeeks(*weekNumber)
+	// Determine double-down users
+	ddusers, err := players.DoubleDownRemaining(*weekNumber)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(-1)
+		panic(err)
 	}
 
-	fmt.Printf("Filtered Probabilities:\n%v\n", probs)
+	log.Printf("The following users have not yet been eliminated: %v", players)
+	log.Printf("The following users still have their double-down remaining: %v", bts.SliceMap(ddusers))
+
+	probs.FilterWeeks(*weekNumber)
+	log.Printf("Filtered probabilities: %v", probs)
 
 	// Here we go.
-	// Find the unique remaining teams.
-	uniqueUsers, uniques := remaining.UniqueUsers()
-	fmt.Println("The following users are clones of one another:")
-	for uu, ou := range uniques {
-		if len(ou) == 0 {
-			fmt.Printf("%s (unique)\n%v\n", uu, uniqueUsers[uu])
-		} else {
-			fmt.Printf("%s cloned by %s\n%v\n", uu, ou, uniqueUsers[uu])
+	// Find the unique users.
+	duplicates := players.Duplicates()
+	log.Println("The following users are clones of one another:")
+	for user, clones := range duplicates {
+		log.Printf("%s clones %v", user, clones)
+		for _, clone := range clones {
+			delete(players, clone)
 		}
 	}
 
 	// Loop through the unique users
-	for user, remainingTeams := range uniqueUsers {
+	for user, remainingTeams := range players {
 
-		pb, err := probs.CopyWithTeams(remainingTeams)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(-1)
+		teams := make(bts.TeamList, len(remainingTeams))
+		for i, t := range remainingTeams {
+			teams[i] = bts.Team(t)
 		}
 
-		// For permutations to work properly, these should be sorted
-		sort.Strings(remainingTeams)
-
-		// This is the best I can do
-		var bestPerm orderPerm
-
-		// These are the results from my goroutines
-		results := make(chan orderPerm)
-
-		// I could make this more complicated by closing the channel, but I will instead just count the goroutines
-		var nGoes int
-
+		var ddTeam *bts.DoubleDown
 		if ddusers[user] {
-			nGoes = len(remainingTeams)
+			ddTeam = bts.BestWeek(teams[0], probs)
+			teams = teams[1:]
+		}
 
-			// Each dd team gets its own goroutine
-			for _, ddt := range remainingTeams {
-				_, ddw := maxFloat64(pb[ddt])
+		streak := bts.Streak{
+			Teams:       teams,
+			DD:          ddTeam,
+			Probability: teams.Probability(probs),
+		}
 
-				teamsAfterDD, _ := remainingTeams.CopyWithoutTeam(ddt)
+		permutation := make(chan bts.Streak, numCPU)
+		go streak.Permute(permutation, probs)
+		best := streak
 
-				pPerThread := math.MaxInt32
-				go permute(0, pPerThread, teamsAfterDD, pb, ddt, ddw, results)
-
-			}
-
-		} else {
-
-			// If there are more teams remaining than cores, then the number of permutations
-			// will always be divisible evenly by the remaining cores.  If not, then don't
-			// bother too much to try to fill all cores with goroutines, because your overhead
-			// is going to kill you anyway.
-			if len(remainingTeams) > numCPU {
-				nGoes = numCPU
-			} else {
-				nGoes = len(remainingTeams)
-			}
-
-			// Divy up the permutations
-			nPermutations := intFactorial(len(remainingTeams))
-			pPerThread := nPermutations / nGoes
-
-			for i := 0; i < nGoes; i++ {
-				go permute(i, pPerThread, remainingTeams, probs, "", -1, results)
+		for p := range permutation {
+			if p.Probability > best.Probability {
+				best = p
 			}
 		}
 
-		for i := 0; i < nGoes; i++ {
-			bestPerm.UpdateGT(<-results)
+		fmt.Printf("%s", user)
+		if _, ok := duplicates[user]; ok {
+			fmt.Printf(" (clones %v)", duplicates[user])
 		}
+		fmt.Println()
+		fmt.Println(best.String(probs))
 
-		fmt.Printf("-- %s ", user)
-		if len(uniques[user]) == 0 {
-			fmt.Print("(unique)\n")
-		} else {
-			fmt.Printf("cloned by %s\n", uniques[user])
-		}
-		pb.PrintProbs(bestPerm)
 	}
 }

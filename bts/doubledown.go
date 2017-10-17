@@ -1,12 +1,12 @@
 package bts
 
 type DoubleDown struct {
-	Team        string
+	Team        Team
 	Week        int
 	Probability float64
 }
 
-func BestWeek(t string, p Probabilities) DoubleDown {
+func BestWeek(t Team, p Probabilities) *DoubleDown {
 	max := 0.
 	maxWeek := -1
 	for week, prob := range p[t] {
@@ -15,5 +15,5 @@ func BestWeek(t string, p Probabilities) DoubleDown {
 			maxWeek = week
 		}
 	}
-	return DoubleDown{Team: t, Week: maxWeek, Probability: max}
+	return &DoubleDown{Team: t, Week: maxWeek, Probability: max}
 }

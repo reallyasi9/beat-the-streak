@@ -43,7 +43,7 @@ func (pm PlayerMap) InferWeek() (int, error) {
 			return -1, fmt.Errorf("player %s does not have a sensible number of teams remaining (%d)", name, nteams)
 		}
 	}
-	return min, nil
+	return 14 - min, nil
 }
 
 func (pm PlayerMap) DoubleDownRemaining(week int) (map[string]bool, error) {
@@ -51,9 +51,9 @@ func (pm PlayerMap) DoubleDownRemaining(week int) (map[string]bool, error) {
 	for name, teams := range pm {
 		nteams := len(teams)
 		switch nteams {
-		case week:
+		case 14 - week:
 			dd[name] = false
-		case week + 1:
+		case 15 - week:
 			dd[name] = true
 		default:
 			return nil, fmt.Errorf("player %s does not have a sensible number of teams remaining (%d)", name, nteams)
@@ -74,6 +74,9 @@ func (pm PlayerMap) Duplicates() map[string][]string {
 				out[name1] = append(out[name1], name2)
 			}
 		}
+		if len(out[name1]) == 0 {
+			delete(out, name1)
+		}
 	}
 	return out
 }
@@ -88,20 +91,12 @@ func (pm PlayerMap) PlayerNames() []string {
 	return out
 }
 
-func mapSlice(s []string) map[string]bool {
-	m := make(map[string]bool)
-	for _, st := range s {
-		m[st] = true
-	}
-	return m
-}
-
 func equal(s1 []string, s2 []string) bool {
 	if len(s1) != len(s2) {
 		return false
 	}
-	m1 := mapSlice(s1)
-	m2 := mapSlice(s2)
+	m1 := MapSlice(s1)
+	m2 := MapSlice(s2)
 	if len(m1) != len(m2) {
 		return false // watch for duplicates!
 	}

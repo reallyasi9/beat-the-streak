@@ -9,7 +9,7 @@ import (
 	"github.com/atgjack/prob"
 )
 
-type Ratings map[string]float64
+type Ratings map[Team]float64
 
 func (r Ratings) MakeProbabilities(s Schedule, bias, stdDev, penalty float64) (Probabilities, error) {
 	normal := prob.Normal{Mu: 0, Sigma: stdDev}
@@ -32,7 +32,7 @@ func (r Ratings) MakeProbabilities(s Schedule, bias, stdDev, penalty float64) (P
 			t1close := team2[0] == '<'
 			neutral := team2[0] == '!'
 			if t2home || t2close || t1close || neutral {
-				team2 = string(team2[1:])
+				team2 = team2[1:]
 			}
 			rating2, ok := r[team2]
 			if !ok {
@@ -81,7 +81,7 @@ func MakeRatings(url string) (Ratings, error) {
 		if err != nil {
 			return nil, err
 		}
-		r[matches[1]] = rval
+		r[Team(matches[1])] = rval
 	}
 
 	return r, nil
