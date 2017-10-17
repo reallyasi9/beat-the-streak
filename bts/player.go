@@ -72,6 +72,7 @@ func (pm PlayerMap) Duplicates() map[string][]string {
 			}
 			if equal(teams1, teams2) {
 				out[name1] = append(out[name1], name2)
+				delete(pm, name2)
 			}
 		}
 		if len(out[name1]) == 0 {

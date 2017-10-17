@@ -60,7 +60,7 @@ func (s Streak) Permute(c chan<- Streak, p Probabilities) {
 	teams := s.Teams.Clone()
 	dd := s.DD
 
-	tchan := make(chan TeamList)
+	tchan := make(chan TeamList, 100)
 	go Permute(teams, tchan)
 	for t := range tchan {
 		teams = t
@@ -86,7 +86,7 @@ func (s Streak) Permute(c chan<- Streak, p Probabilities) {
 			dd.Probability = dd2.Probability
 			dd.Week = dd2.Week
 
-			tchan := make(chan TeamList)
+			tchan := make(chan TeamList, 100)
 			go Permute(teams, tchan)
 			for t := range tchan {
 				teams = t

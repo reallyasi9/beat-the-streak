@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"sync"
 
 	"runtime"
 
@@ -106,7 +107,10 @@ func main() {
 	}
 
 	// Loop through the unique users
+	results := make(map[string]chan bts.Streak)
+	var wg sync.WaitGroup
 	for user, remainingTeams := range players {
+		wg.Add(1)
 
 		teams := make(bts.TeamList, len(remainingTeams))
 		for i, t := range remainingTeams {
@@ -125,22 +129,32 @@ func main() {
 			Probability: teams.Probability(probs),
 		}
 
-		permutation := make(chan bts.Streak, numCPU)
-		go streak.Permute(permutation, probs)
-		best := streak
-
-		for p := range permutation {
-			if p.Probability > best.Probability {
-				best = p
-			}
-		}
-
-		fmt.Printf("%s", user)
-		if _, ok := duplicates[user]; ok {
-			fmt.Printf(" (clones %v)", duplicates[user])
-		}
-		fmt.Println()
-		fmt.Println(best.String(probs))
-
+		results[user] = make(chan bts.Streak, 100)
+		go func() {
+			defer wg.Done()
+			streak.Permute(results[user], probs)
+		}()
 	}
+
+	for user, result := range results {
+		wg.Add(1)
+		go func(user string, result chan bts.Streak) {
+			defer wg.Done()
+			best := <-result
+			for p := range result {
+				if p.Probability > best.Probability {
+					best = p
+				}
+			}
+
+			fmt.Printf("%s", user)
+			if _, ok := duplicates[user]; ok {
+				fmt.Printf(" (clones %v)", duplicates[user])
+			}
+			fmt.Println()
+			fmt.Println(best.String(probs))
+		}(user, result)
+	}
+
+	wg.Wait()
 }
