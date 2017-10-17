@@ -92,6 +92,44 @@ func (pm PlayerMap) PlayerNames() []string {
 	return out
 }
 
+func (p Player) BestStreak(probs Probabilities, doubleDown bool) Streak {
+
+	// Convert player (a list of team names) to a TeamList
+	teams := make(TeamList, len(p))
+	for i, t := range p {
+		teams[i] = Team(t)
+	}
+
+	var ddTeam *DoubleDown
+	// If double down still avaialbe, start by making the first team the DD and
+	// cut down the number of teams in the list by one.
+	if doubleDown {
+		ddTeam = BestWeek(teams[0], probs)
+		teams = teams[1:]
+	}
+
+	// Create a first streak
+	streak := Streak{
+		Teams:       teams,
+		DD:          ddTeam,
+		Probability: teams.Probability(probs),
+	}
+
+	// Channel to accept permutaitons
+	results := make(chan Streak, 100) // large-ish buffer
+	// Permute the streak.
+	go streak.Permute(results, probs)
+
+	// Read from the channel to see which streak is best
+	for result := range results {
+		if result.Probability > streak.Probability {
+			streak = result.Clone()
+		}
+	}
+
+	return streak
+}
+
 func equal(s1 []string, s2 []string) bool {
 	if len(s1) != len(s2) {
 		return false
