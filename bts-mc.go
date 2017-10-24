@@ -65,6 +65,7 @@ func main() {
 		panic(err)
 	}
 	log.Printf("Made probabilities %v", probs)
+	log.Printf("Made spreads %v", spreads)
 
 	players, err := bts.MakePlayers(*remainingFile)
 	if err != nil {
@@ -92,7 +93,9 @@ func main() {
 	log.Printf("The following users still have their double-down remaining: %v", bts.SliceMap(ddusers))
 
 	probs.FilterWeeks(*weekNumber)
+	spreads.FilterWeeks(*weekNumber)
 	log.Printf("Filtered probabilities: %v", probs)
+	log.Printf("Filtered spreads: %v", spreads)
 
 	// Here we go.
 	// Find the unique users.
