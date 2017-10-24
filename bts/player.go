@@ -128,7 +128,7 @@ func (p Player) BestStreak(probs Probabilities, spreads Spreads, doubleDown bool
 
 	// Read from the channel to see which streak is best
 	for result := range results {
-		if result.Probability > byProb[0].Probability {
+		if result.Probability > byProb[topn-1].Probability {
 			byProb = append(byProb, result.Clone())
 			sort.Sort(byProb)
 			byProb = byProb[:topn]
