@@ -37,7 +37,7 @@ var scheduleFile = flag.String("schedule",
 	"YAML `file` containing B1G schedule")
 var remainingFile = flag.String("remaining", "remaining.yaml", "YAML `file` containing picks remaining for each contestant")
 var weekNumber = flag.Int("week", -1, "Week `number` [1-13]")
-var penalty = flag.Float64("penalty", 1.0, "Penalty `probability` where to begin a linear penalty (to avoid high-probability games in accordance with the tiebreaker rules)")
+var nTop = flag.Int("n", 5, "`number` of top probabilities to report for each player to check for better spreads")
 
 func main() {
 	flag.Parse()
@@ -60,7 +60,7 @@ func main() {
 	}
 	log.Printf("Made schedule %v", schedule)
 
-	probs, err := ratings.MakeProbabilities(schedule, bias, stdDev, *penalty)
+	probs, spreads, err := ratings.MakeProbabilities(schedule, bias, stdDev)
 	if err != nil {
 		panic(err)
 	}
@@ -106,12 +106,12 @@ func main() {
 	}
 
 	// Loop through the unique users
-	results := make(map[string]chan bts.Streak)
+	results := make(map[string]chan bts.StreakByProb)
 	for user, remainingTeams := range players {
 
-		results[user] = make(chan bts.Streak, numCPU)
+		results[user] = make(chan bts.StreakByProb, numCPU)
 		go func(user string, remainingTeams bts.Player) {
-			results[user] <- remainingTeams.BestStreak(probs, ddusers[user])
+			results[user] <- remainingTeams.BestStreak(probs, spreads, ddusers[user], *nTop)
 		}(user, remainingTeams)
 	}
 
@@ -123,7 +123,9 @@ func main() {
 		}
 		fmt.Println()
 		best := <-result
-		fmt.Println(best.String(probs))
+		for _, res := range best {
+			fmt.Println(res.String(probs))
+		}
 	}
 
 }

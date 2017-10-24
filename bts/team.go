@@ -45,3 +45,12 @@ func (t TeamList) Probability(p Probabilities) float64 {
 	}
 	return prob
 }
+
+// Spreads returns the predicted spreads for each game
+func (t TeamList) Spreads(s Spreads) []float64 {
+	out := make([]float64, len(t))
+	for i, team := range t {
+		out[i] = s[team][i]
+	}
+	return out
+}

@@ -3,6 +3,7 @@ package bts
 import (
 	"fmt"
 	"io/ioutil"
+	"sort"
 
 	yaml "gopkg.in/yaml.v2"
 )
@@ -92,7 +93,7 @@ func (pm PlayerMap) PlayerNames() []string {
 	return out
 }
 
-func (p Player) BestStreak(probs Probabilities, doubleDown bool) Streak {
+func (p Player) BestStreak(probs Probabilities, spreads Spreads, doubleDown bool, topn int) StreakByProb {
 
 	// Convert player (a list of team names) to a TeamList
 	teams := make(TeamList, len(p))
@@ -104,30 +105,42 @@ func (p Player) BestStreak(probs Probabilities, doubleDown bool) Streak {
 	// If double down still avaialbe, start by making the first team the DD and
 	// cut down the number of teams in the list by one.
 	if doubleDown {
-		ddTeam = BestWeek(teams[0], probs)
+		ddTeam = BestWeek(teams[0], probs, spreads)
 		teams = teams[1:]
 	}
+
+	// Create output
+	byProb := make(StreakByProb, topn)
+	// bySpread := make(StreakBySpread, topn)
 
 	// Create a first streak
 	streak := Streak{
 		Teams:       teams,
 		DD:          ddTeam,
 		Probability: teams.Probability(probs),
+		Spreads:     teams.Spreads(spreads),
 	}
 
 	// Channel to accept permutaitons
 	results := make(chan Streak, 100) // large-ish buffer
 	// Permute the streak.
-	go streak.Permute(results, probs)
+	go streak.Permute(results, probs, spreads)
 
 	// Read from the channel to see which streak is best
 	for result := range results {
-		if result.Probability > streak.Probability {
-			streak = result.Clone()
+		if result.Probability > byProb[0].Probability {
+			byProb = append(byProb, result.Clone())
+			sort.Sort(byProb)
+			byProb = byProb[:topn]
 		}
+		// if result.Spread < bySpread[0].Spread {
+		// 	bySpread = append(bySpread, result.Clone())
+		// 	sort.Sort(bySpread)
+		// 	bySpread = bySpread[:topn]
+		// }
 	}
 
-	return streak
+	return byProb //, bySpread
 }
 
 func equal(s1 []string, s2 []string) bool {

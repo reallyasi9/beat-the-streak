@@ -11,20 +11,23 @@ import (
 
 type Ratings map[Team]float64
 
-func (r Ratings) MakeProbabilities(s Schedule, bias, stdDev, penalty float64) (Probabilities, error) {
+func (r Ratings) MakeProbabilities(s Schedule, bias, stdDev float64) (Probabilities, Spreads, error) {
 	normal := prob.Normal{Mu: 0, Sigma: stdDev}
 
 	p := make(Probabilities)
+	spr := make(Spreads)
 
 	for team1, sched := range s {
 		p[team1] = make([]float64, 13)
+		spr[team1] = make([]float64, 13)
 		rating1, ok := r[team1]
 		if !ok {
-			return nil, fmt.Errorf("team %s not in ratings", team1)
+			return nil, nil, fmt.Errorf("team %s not in ratings", team1)
 		}
 		for i, team2 := range sched {
 			if team2 == "" {
 				p[team1][i] = 0.
+				spr[team1][i] = 0.
 				continue
 			}
 			t2home := team2[0] == '@'
@@ -36,7 +39,7 @@ func (r Ratings) MakeProbabilities(s Schedule, bias, stdDev, penalty float64) (P
 			}
 			rating2, ok := r[team2]
 			if !ok {
-				return nil, fmt.Errorf("team %s (opponent of %s in week %d) not in ratings", team2, team1, i+1)
+				return nil, nil, fmt.Errorf("team %s (opponent of %s in week %d) not in ratings", team2, team1, i+1)
 			}
 			spread := rating1 - rating2
 			if t2home {
@@ -50,17 +53,12 @@ func (r Ratings) MakeProbabilities(s Schedule, bias, stdDev, penalty float64) (P
 			}
 			rawp := normal.Cdf(spread)
 			capp := rawp
-			if rawp > penalty && penalty != 1. {
-				// Above penalty, the distribution is linear, matching value to the y=x diagonal.
-				denom := penalty - 1
-				b := penalty / denom
-				capp = b*rawp - b
-			}
+			spr[team1][i] = math.Abs(spread)
 			p[team1][i] = capp
 		}
 	}
 
-	return p, nil
+	return p, spr, nil
 }
 
 func MakeRatings(url string) (Ratings, error) {
