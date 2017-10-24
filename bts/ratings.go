@@ -53,7 +53,7 @@ func (r Ratings) MakeProbabilities(s Schedule, bias, stdDev float64) (Probabilit
 			}
 			rawp := normal.Cdf(spread)
 			capp := rawp
-			spr[team1][i] = math.Abs(spread)
+			spr[team1][i] = spread
 			p[team1][i] = capp
 		}
 	}
