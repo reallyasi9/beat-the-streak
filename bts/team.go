@@ -21,7 +21,7 @@ func (t TeamList) Swap(i, j int) {
 }
 
 func (t TeamList) Clone() TeamList {
-	out := make(TeamList, len(t))
+	out := make(TeamList, t.Len())
 	for i, team := range t {
 		out[i] = team
 	}
@@ -30,7 +30,7 @@ func (t TeamList) Clone() TeamList {
 
 // Probabilities returns the probabilities of the team list for the given order
 func (t TeamList) Probabilities(p Probabilities) []float64 {
-	out := make([]float64, len(t))
+	out := make([]float64, t.Len())
 	for i, team := range t {
 		out[i] = p[team][i]
 	}
@@ -48,7 +48,7 @@ func (t TeamList) Probability(p Probabilities) float64 {
 
 // Spreads returns the predicted spreads for each game
 func (t TeamList) Spreads(s Spreads) []float64 {
-	out := make([]float64, len(t))
+	out := make([]float64, t.Len())
 	for i, team := range t {
 		out[i] = s[team][i]
 	}
