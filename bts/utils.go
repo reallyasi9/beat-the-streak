@@ -18,10 +18,10 @@ func getURLBody(url string) ([]byte, error) {
 	return body, nil
 }
 
-// Permute creates all possible permutations of a sort.Interface and issues them
+// TeamPermute creates all possible permutations of a sort.Interface and issues them
 // to a chan.  This uses the non-recursive form of Heap's algorithm, which is
 // well-suited for a goroutine.  See https://en.wikipedia.org/wiki/Heap%27s_algorithm
-func Permute(s TeamList, c chan<- TeamList) {
+func TeamPermute(s TeamList, c chan<- TeamList) {
 	defer close(c)
 
 	// First permutation: self

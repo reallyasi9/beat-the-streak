@@ -38,7 +38,7 @@ func (s *Streak) String(p Probabilities, spr Spreads, startWeek int) string {
 	out.WriteString("]")
 
 	if s.DD != nil {
-		out.WriteString(fmt.Sprintf(" %-[1]*[2]s @ Week %2[3]d", maxLen, s.DD.Team, s.DD.Week + startWeek))
+		out.WriteString(fmt.Sprintf(" %-[1]*[2]s @ Week %2[3]d", maxLen, s.DD.Team, s.DD.Week+startWeek))
 	}
 	out.WriteString("\n ")
 
@@ -61,19 +61,6 @@ func (s *Streak) String(p Probabilities, spr Spreads, startWeek int) string {
 	}
 	out.WriteString(fmt.Sprintf(" = %-[1]*.4[2]g/%-5.1[3]f", maxLen-6, totProb, sumSpread))
 	return out.String()
-}
-
-func (s Streak) Permute(c chan<- StreakProb, p Probabilities) {
-	defer close(c)
-
-	// Results channel
-	tchan := make(chan TeamList, 100)
-	Permute(s.Teams, tchan)
-
-	for t := range tchan {
-		c <- StreakProbability(&Streak{Teams: t, DD: s.DD}, p)
-	}
-
 }
 
 // StreakMap is a simple map of player names to streaks

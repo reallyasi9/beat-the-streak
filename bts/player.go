@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"runtime"
 	"sort"
+	"sync"
 
 	yaml "gopkg.in/yaml.v2"
 )
@@ -98,11 +99,12 @@ func (p Player) BestStreaks(probs Probabilities, doubleDown bool, topn int) Stre
 
 	// Channel to send streaks
 	jobs := make(chan Streak, 100) // large-ish buffer
-	// Channel to accept permutaitons
-	results := make(chan StreakProb, 100) // large-ish buffer
+	// Channels to accept permutaitons
+	results := make([]<-chan StreakProb, runtime.NumCPU())
+
 	// Workers to churn the data
 	for i := 0; i < runtime.NumCPU(); i++ {
-		go playerWorker(jobs, results, probs)
+		results[i] = permuteWorker(jobs, probs)
 	}
 
 	// Convert player (a list of team names) to a TeamList
@@ -115,9 +117,10 @@ func (p Player) BestStreaks(probs Probabilities, doubleDown bool, topn int) Stre
 	if doubleDown {
 		// If double down still avaialbe, start by making the first team the DD and
 		// cut down the number of teams in the list by one.
-		for i := 0; i < teams.Len(); i++ {
-			ddTeam := BestWeek(teams[i], probs)
-			remainingTeams := append(teams[:i], teams[i+1:]...)
+		for i, team := range teams {
+			ddTeam := BestWeek(team, probs)
+			remainingTeams := teams.Clone()
+			remainingTeams = append(remainingTeams[:i], remainingTeams[i+1:]...)
 
 			// Create a first streak
 			streak := Streak{
@@ -145,7 +148,7 @@ func (p Player) BestStreaks(probs Probabilities, doubleDown bool, topn int) Stre
 	byProb := make(StreaksByProb, topn)
 
 	// Read from the channel to see which streak is best
-	for result := range results {
+	for result := range merge(results...) {
 		if result.Prob > byProb[topn-1].Prob {
 			byProb = append(byProb, result)
 			sort.Sort(byProb)
@@ -154,15 +157,53 @@ func (p Player) BestStreaks(probs Probabilities, doubleDown bool, topn int) Stre
 	}
 
 	// Now that I have the permutation numbers that are best,
-
 	return byProb
 }
 
-func playerWorker(jobs <-chan Streak, results chan<- StreakProb, p Probabilities) {
-	//defer close(results) closed in streak.Permute
-	for streak := range jobs {
-		streak.Permute(results, p)
+func permuteWorker(jobs <-chan Streak, p Probabilities) chan StreakProb {
+	results := make(chan StreakProb, 100)
+
+	go func() {
+		defer close(results)
+		for s := range jobs {
+			// Results channel
+			tchan := make(chan TeamList, 100)
+			go TeamPermute(s.Teams, tchan)
+
+			for t := range tchan {
+				results <- StreakProbability(&Streak{Teams: t, DD: s.DD}, p)
+			}
+		}
+	}()
+
+	return results
+}
+
+// See https://blog.golang.org/pipelines
+func merge(cs ...<-chan StreakProb) <-chan StreakProb {
+	var wg sync.WaitGroup
+	out := make(chan StreakProb)
+
+	// Start an output goroutine for each input channel in cs.  output
+	// copies values from c to out until c is closed, then calls wg.Done.
+	output := func(c <-chan StreakProb) {
+		for n := range c {
+			out <- n
+		}
+		wg.Done()
 	}
+	wg.Add(len(cs))
+	for _, c := range cs {
+		go output(c)
+	}
+
+	// Start a goroutine to close out once all the output goroutines are
+	// done.  This must start after the wg.Add call.
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+	return out
 }
 
 func equal(s1 []string, s2 []string) bool {

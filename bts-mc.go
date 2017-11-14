@@ -113,7 +113,7 @@ func main() {
 	jobs := make(chan namedPlayer, len(players))
 
 	for i := 0; i < runtime.NumCPU(); i++ {
-		go worker(jobs, results, probs, *nTop)
+		go worker(i, jobs, results, probs, *nTop)
 	}
 
 	for user, remainingTeams := range players {
@@ -147,7 +147,7 @@ type namedPlayer struct {
 	Teams  bts.Player
 }
 
-func worker(jobs <-chan namedPlayer, results chan<- playerResult, probs bts.Probabilities, nTop int) {
+func worker(i int, jobs <-chan namedPlayer, results chan<- playerResult, probs bts.Probabilities, nTop int) {
 	for p := range jobs {
 		results <- playerResult{Player: p.Player, Result: p.Teams.BestStreaks(probs, p.DD, nTop)}
 	}
