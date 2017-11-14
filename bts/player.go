@@ -3,6 +3,7 @@ package bts
 import (
 	"fmt"
 	"io/ioutil"
+	"runtime"
 	"sort"
 
 	yaml "gopkg.in/yaml.v2"
@@ -93,7 +94,16 @@ func (pm PlayerMap) PlayerNames() []string {
 	return out
 }
 
-func (p Player) BestStreak(probs Probabilities, spreads Spreads, doubleDown bool, topn int) StreakByProb {
+func (p Player) BestStreaks(probs Probabilities, doubleDown bool, topn int) StreaksByProb {
+
+	// Channel to send streaks
+	jobs := make(chan Streak, 100) // large-ish buffer
+	// Channel to accept permutaitons
+	results := make(chan StreakProb, 100) // large-ish buffer
+	// Workers to churn the data
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go playerWorker(jobs, results, probs)
+	}
 
 	// Convert player (a list of team names) to a TeamList
 	teams := make(TeamList, len(p))
@@ -101,46 +111,58 @@ func (p Player) BestStreak(probs Probabilities, spreads Spreads, doubleDown bool
 		teams[i] = Team(t)
 	}
 
-	var ddTeam *DoubleDown
-	// If double down still avaialbe, start by making the first team the DD and
-	// cut down the number of teams in the list by one.
+	// Send streaks down the line
 	if doubleDown {
-		ddTeam = BestWeek(teams[0], probs, spreads)
-		teams = teams[1:]
+		// If double down still avaialbe, start by making the first team the DD and
+		// cut down the number of teams in the list by one.
+		for i := 0; i < teams.Len(); i++ {
+			ddTeam := BestWeek(teams[i], probs)
+			remainingTeams := append(teams[:i], teams[i+1:]...)
+
+			// Create a first streak
+			streak := Streak{
+				Teams: remainingTeams,
+				DD:    ddTeam,
+			}
+
+			// Send it to a worker
+			jobs <- streak
+		}
+
+	} else {
+		var ddTeam *DoubleDown
+		streak := Streak{
+			Teams: teams,
+			DD:    ddTeam,
+		}
+		jobs <- streak
 	}
+
+	// No more jobs are coming
+	close(jobs)
 
 	// Create output
-	byProb := make(StreakByProb, topn)
-	// bySpread := make(StreakBySpread, topn)
-
-	// Create a first streak
-	streak := Streak{
-		Teams:       teams,
-		DD:          ddTeam,
-		Probability: teams.Probability(probs),
-		Spreads:     teams.Spreads(spreads),
-	}
-
-	// Channel to accept permutaitons
-	results := make(chan Streak, 100) // large-ish buffer
-	// Permute the streak.
-	go streak.Permute(results, probs, spreads)
+	byProb := make(StreaksByProb, topn)
 
 	// Read from the channel to see which streak is best
 	for result := range results {
-		if result.Probability > byProb[topn-1].Probability {
-			byProb = append(byProb, result.Clone())
+		if result.Prob > byProb[topn-1].Prob {
+			byProb = append(byProb, result)
 			sort.Sort(byProb)
 			byProb = byProb[:topn]
 		}
-		// if result.Spread < bySpread[0].Spread {
-		// 	bySpread = append(bySpread, result.Clone())
-		// 	sort.Sort(bySpread)
-		// 	bySpread = bySpread[:topn]
-		// }
 	}
 
-	return byProb //, bySpread
+	// Now that I have the permutation numbers that are best,
+
+	return byProb
+}
+
+func playerWorker(jobs <-chan Streak, results chan<- StreakProb, p Probabilities) {
+	//defer close(results) closed in streak.Permute
+	for streak := range jobs {
+		streak.Permute(results, p)
+	}
 }
 
 func equal(s1 []string, s2 []string) bool {

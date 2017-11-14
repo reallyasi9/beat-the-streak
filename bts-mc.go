@@ -109,26 +109,46 @@ func main() {
 	}
 
 	// Loop through the unique users
-	results := make(map[string]chan bts.StreakByProb)
-	for user, remainingTeams := range players {
+	results := make(chan playerResult, len(players))
+	jobs := make(chan namedPlayer, len(players))
 
-		results[user] = make(chan bts.StreakByProb, numCPU)
-		go func(user string, remainingTeams bts.Player) {
-			results[user] <- remainingTeams.BestStreak(probs, spreads, ddusers[user], *nTop)
-		}(user, remainingTeams)
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go worker(jobs, results, probs, *nTop)
 	}
+
+	for user, remainingTeams := range players {
+		jobs <- namedPlayer{Player: user, DD: ddusers[user], Teams: remainingTeams}
+	}
+	close(jobs)
 
 	// Drain the results now
-	for user, result := range results {
-		fmt.Printf("%s", user)
-		if _, ok := duplicates[user]; ok {
-			fmt.Printf(" (clones %v)", duplicates[user])
+	for range players {
+		result := <-results
+		fmt.Printf("%s", result.Player)
+		if _, ok := duplicates[result.Player]; ok {
+			fmt.Printf(" (clones %v)", duplicates[result.Player])
 		}
 		fmt.Println()
-		best := <-result
-		for _, res := range best {
-			fmt.Println(res.String(probs, *weekNumber))
+		for _, res := range result.Result {
+			fmt.Println(res.Streak.String(probs, spreads, *weekNumber))
 		}
 	}
 
+}
+
+type playerResult struct {
+	Player string
+	Result bts.StreaksByProb
+}
+
+type namedPlayer struct {
+	Player string
+	DD     bool
+	Teams  bts.Player
+}
+
+func worker(jobs <-chan namedPlayer, results chan<- playerResult, probs bts.Probabilities, nTop int) {
+	for p := range jobs {
+		results <- playerResult{Player: p.Player, Result: p.Teams.BestStreaks(probs, p.DD, nTop)}
+	}
 }
