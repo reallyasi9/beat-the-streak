@@ -24,7 +24,7 @@ func (s Streak) Clone() Streak {
 	return Streak{Teams: t2, DD: dd2, Probability: p2, Spreads: s2}
 }
 
-func (s Streak) String(p Probabilities) string {
+func (s Streak) String(p Probabilities, startWeek int) string {
 	var out bytes.Buffer
 	out.WriteString("[")
 
@@ -43,7 +43,7 @@ func (s Streak) String(p Probabilities) string {
 	out.WriteString("]")
 
 	if s.DD != nil {
-		out.WriteString(fmt.Sprintf(" %-[1]*[2]s @ Week %2[3]d", maxLen, s.DD.Team, s.DD.Week))
+		out.WriteString(fmt.Sprintf(" %-[1]*[2]s @ Week %2[3]d", maxLen, s.DD.Team, s.DD.Week + startWeek))
 	}
 	out.WriteString("\n ")
 

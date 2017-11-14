@@ -127,7 +127,7 @@ func main() {
 		fmt.Println()
 		best := <-result
 		for _, res := range best {
-			fmt.Println(res.String(probs))
+			fmt.Println(res.String(probs, *weekNumber))
 		}
 	}
 
