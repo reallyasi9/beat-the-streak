@@ -130,9 +130,14 @@ func main() {
 		}
 		fmt.Println()
 		for _, res := range result.Result {
+			if res.Streak == nil {
+				continue
+			}
 			fmt.Println(res.Streak.String(probs, spreads, *weekNumber))
 		}
 	}
+
+	close(results)
 
 }
 
