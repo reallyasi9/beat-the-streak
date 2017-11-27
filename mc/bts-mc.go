@@ -7,25 +7,10 @@ import (
 
 	"runtime"
 
-	"./bts"
+	"../bts"
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
-var b1gTeams = map[string]string{
-	"Illinois":       "ILL",
-	"Indiana":        "IND",
-	"Iowa":           "IOWA",
-	"Maryland":       "UMD",
-	"Michigan":       "MICH",
-	"Michigan State": "MSU",
-	"Minnesota":      "MINN",
-	"Nebraska":       "NEB",
-	"Northwestern":   "NU",
-	"Ohio State":     "OSU",
-	"Penn State":     "PSU",
-	"Purdue":         "PUR",
-	"Rutgers":        "RUT",
-	"Wisconsin":      "WISC"}
 var ratingsURL = flag.String("ratings",
 	"http://sagarin.com/sports/cfsend.htm",
 	"`URL` of Sagarin ratings for calculating probabilities of win")
