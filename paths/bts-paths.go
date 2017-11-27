@@ -72,6 +72,11 @@ func main() {
 		fmt.Println()
 	}
 
+	fmt.Printf("Paths found: %d\n", nSolutions)
+	if nSolutions == 100000000 {
+		fmt.Println("Number of paths reached maximum: more paths might exist!")
+	}
+
 	close(results)
 
 }
