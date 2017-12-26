@@ -39,13 +39,13 @@ func (oc *outcomes) countPaths(out chan<- bts.Streak) {
 	jobs := make(chan bts.TeamList, 100)
 	results := make(chan bts.TeamList, 100)
 	wg := new(sync.WaitGroup)
-	for i := 0; i < numCPU; i++ {
+	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go cpWorker(jobs, results, oc, wg)
 	}
 
 	wg2 := new(sync.WaitGroup)
-	for i := 0; i < numCPU; i++ {
+	for i := 0; i < 100; i++ {
 		wg2.Add(1)
 		go streakWorker(results, out, oc, wg)
 	}
