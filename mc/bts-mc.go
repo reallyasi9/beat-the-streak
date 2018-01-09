@@ -50,7 +50,7 @@ func main() {
 		panic(err)
 	}
 	log.Printf("Made probabilities\n%s", probs)
-	log.Printf("Made spreads %v", spreads)
+	log.Printf("Made spreads\n%s", spreads)
 
 	players, err := bts.MakePlayers(*remainingFile)
 	if err != nil {
@@ -80,7 +80,7 @@ func main() {
 	probs.FilterWeeks(*weekNumber)
 	spreads.FilterWeeks(*weekNumber)
 	log.Printf("Filtered probabilities:\n%s", probs)
-	log.Printf("Filtered spreads: %v", spreads)
+	log.Printf("Filtered spreads:\n%s", spreads)
 
 	// Here we go.
 	// Find the unique users.

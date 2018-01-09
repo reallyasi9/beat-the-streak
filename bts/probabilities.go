@@ -30,17 +30,17 @@ func (p Probabilities) String() string {
 
 	var buffer bytes.Buffer
 
-	buffer.WriteString("          ")
+	buffer.WriteString("              ")
 	for i = 0; i < nWeeks; i++ {
 		buffer.WriteString(fmt.Sprintf(" %8d ", i))
 	}
 	buffer.WriteString("\n")
 	for _, k := range keys {
 		key := k
-		if len(key) > 8 {
-			key = k[:8]
+		if len(key) > 12 {
+			key = k[:12]
 		}
-		buffer.WriteString(fmt.Sprintf(" %8s ", key))
+		buffer.WriteString(fmt.Sprintf(" %12s ", key))
 		for _, v := range p[Team(k)] {
 			buffer.WriteString(fmt.Sprintf(" %8.4f ", v))
 		}
