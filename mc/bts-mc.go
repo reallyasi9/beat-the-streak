@@ -49,7 +49,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("Made probabilities %v", probs)
+	log.Printf("Made probabilities\n%s", probs)
 	log.Printf("Made spreads %v", spreads)
 
 	players, err := bts.MakePlayers(*remainingFile)
@@ -79,7 +79,7 @@ func main() {
 
 	probs.FilterWeeks(*weekNumber)
 	spreads.FilterWeeks(*weekNumber)
-	log.Printf("Filtered probabilities: %v", probs)
+	log.Printf("Filtered probabilities:\n%s", probs)
 	log.Printf("Filtered spreads: %v", spreads)
 
 	// Here we go.
