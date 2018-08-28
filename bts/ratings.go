@@ -61,29 +61,42 @@ func (r Ratings) MakeProbabilities(s Schedule, bias, stdDev float64) (Probabilit
 	return p, spr, nil
 }
 
-func MakeRatings(url string) (Ratings, error) {
+func MakeRatings(url string) (Ratings, float64, error) {
 	body, err := getURLBody(url)
 	if err != nil {
-		return nil, err
+		return nil, 0., err
+	}
+
+	edgeRegex := regexp.MustCompile("HOME ADVANTAGE=.*?\\[<font color=\"#0000ff\">\\s*([\\-0-9.]+)")
+	edgeMatch := edgeRegex.FindStringSubmatch(string(body))
+	if edgeMatch == nil {
+		return nil, 0., fmt.Errorf("unable to parse home advantage from %s", url)
+	}
+	edge, err := strconv.ParseFloat(edgeMatch[1], 64)
+	if err != nil {
+		return nil, 0., err
 	}
 
 	ratingsRegex := regexp.MustCompile("<font color=\"#000000\">\\s+\\d+\\s+(.*?)\\s+[A]+\\s*=<.*?<font color=\"#0000ff\">\\s*([\\-0-9.]+)")
 	ratingsStr := ratingsRegex.FindAllStringSubmatch(string(body), -1)
 	if ratingsStr == nil {
-		return nil, fmt.Errorf("unable to parse any ratings from %s", url)
+		return nil, 0., fmt.Errorf("unable to parse any ratings from %s", url)
 	}
 
 	r := make(Ratings)
 	for _, matches := range ratingsStr {
 		rval, err := strconv.ParseFloat(matches[2], 64)
 		if err != nil {
-			return nil, err
+			return nil, 0., err
 		}
 		r[Team(matches[1])] = rval
 	}
 
-	return r, nil
+	return r, edge, nil
 }
+
+// HOME ADVANTAGE=[<font color="#9900ff">  2.36</font>]                                                   [<font color="#0000ff">  2.36</font>]
+// ScrapeHomeEdge scrapes the home edge from the Sagarin ratings.
 
 func ScrapeParameters(url string, modelName string) (float64, float64, error) {
 	body, err := getURLBody(url)
