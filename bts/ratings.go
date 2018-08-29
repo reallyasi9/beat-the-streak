@@ -95,19 +95,16 @@ func MakeRatings(url string) (Ratings, float64, error) {
 	return r, edge, nil
 }
 
-// HOME ADVANTAGE=[<font color="#9900ff">  2.36</font>]                                                   [<font color="#0000ff">  2.36</font>]
-// ScrapeHomeEdge scrapes the home edge from the Sagarin ratings.
-
 func ScrapeParameters(url string, modelName string) (float64, float64, error) {
 	body, err := getURLBody(url)
 	if err != nil {
 		return 0., 0., err
 	}
 
-	perfRegex := regexp.MustCompile(fmt.Sprintf("%s</font>.*?>[\\-0-9.]+<.*?>[\\-0-9.]+<.*?>[\\-0-9.]+<.*?>([\\-0-9.]+)<.*?>([\\-0-9.]+)<", modelName))
+	perfRegex := regexp.MustCompile(fmt.Sprintf("%s</font>.*?>[\\-0-9.]+<.*?>[\\-0-9.]+<.*?>[\\-0-9.]+<.*?>([\\-0-9.]+)<.*?>([\\-0-9.]+)<", regexp.QuoteMeta(modelName)))
 	perfStr := perfRegex.FindSubmatch(body)
 	if perfStr == nil {
-		return 0., 0., fmt.Errorf("unable to parse bais and mean squared error for model %s from %s", modelName, url)
+		return 0., 0., fmt.Errorf("unable to parse bais and mean squared error for model \"%s\" from \"%s\"", modelName, url)
 	}
 	bias, err := strconv.ParseFloat(string(perfStr[1]), 64)
 	if err != nil {
