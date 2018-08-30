@@ -11,6 +11,43 @@ import (
 
 type Ratings map[Team]float64
 
+func (r Ratings) TrueSpread(team1, team2 Team, bias float64) (float64, error) {
+	if team2 == "" {
+		return 0., nil
+	}
+
+	rating1, ok := r[team1]
+	if !ok {
+		return 0., fmt.Errorf("team \"%s\" not in ratings", team1)
+	}
+
+	t2home := team2[0] == '@'
+	t2close := team2[0] == '>'
+	t1close := team2[0] == '<'
+	neutral := team2[0] == '!'
+	if t2home || t2close || t1close || neutral {
+		team2 = team2[1:]
+	}
+
+	rating2, ok := r[team2]
+	if !ok {
+		return 0., fmt.Errorf("team \"%s\" not in ratings", team2)
+	}
+
+	spread := rating1 - rating2
+	if t2home {
+		spread -= bias
+	} else if t2close {
+		spread -= bias / 2
+	} else if t1close {
+		spread += bias / 2
+	} else if !neutral {
+		spread += bias
+	}
+
+	return spread, nil
+}
+
 func (r Ratings) MakeProbabilities(s Schedule, bias, stdDev float64) (Probabilities, Spreads, error) {
 	normal := prob.Normal{Mu: 0, Sigma: stdDev}
 
@@ -20,41 +57,19 @@ func (r Ratings) MakeProbabilities(s Schedule, bias, stdDev float64) (Probabilit
 	for team1, sched := range s {
 		p[team1] = make([]float64, 13)
 		spr[team1] = make([]float64, 13)
-		rating1, ok := r[team1]
-		if !ok {
-			return nil, nil, fmt.Errorf("team %s not in ratings", team1)
-		}
 		for i, team2 := range sched {
 			if team2 == "" {
 				p[team1][i] = 0.
 				spr[team1][i] = 0.
 				continue
 			}
-			t2home := team2[0] == '@'
-			t2close := team2[0] == '>'
-			t1close := team2[0] == '<'
-			neutral := team2[0] == '!'
-			if t2home || t2close || t1close || neutral {
-				team2 = team2[1:]
-			}
-			rating2, ok := r[team2]
-			if !ok {
-				return nil, nil, fmt.Errorf("team %s (opponent of %s in week %d) not in ratings", team2, team1, i+1)
-			}
-			spread := rating1 - rating2
-			if t2home {
-				spread -= bias
-			} else if t2close {
-				spread -= bias / 2
-			} else if t1close {
-				spread += bias / 2
-			} else if !neutral {
-				spread += bias
+			spread, err := r.TrueSpread(team1, team2, bias)
+			if err != nil {
+				return nil, nil, err
 			}
 			rawp := normal.Cdf(spread)
-			capp := rawp
 			spr[team1][i] = spread
-			p[team1][i] = capp
+			p[team1][i] = rawp
 		}
 	}
 
