@@ -22,6 +22,7 @@ var performanceURL = flag.String("performance",
 var scheduleFile = flag.String("schedule",
 	"schedule.yaml",
 	"YAML `file` containing schedule of all pick-your-pony contenders")
+var week = flag.Int("week", 1, "`week` number (starting at 1) for remaining wins calculation")
 var nMC = flag.Int("n", 1000000, "`number` of Monte Carlo simulations to run for each team")
 var hyperVariance = flag.Float64("var",
 	4.723,
@@ -76,7 +77,7 @@ func main() {
 	jobs := make(chan bts.Team, len(schedule))
 
 	for i := 0; i < runtime.NumCPU()+1; i++ {
-		go worker(i, jobs, results, schedule, ratings, bias, stdDev, *hyperVariance, *nMC)
+		go worker(i, jobs, results, schedule, ratings, bias, stdDev, *hyperVariance)
 	}
 
 	for team := range schedule {
@@ -86,8 +87,12 @@ func main() {
 
 	// Print the table header
 	fmt.Print(" Team      Wins: ")
-	for i := 0; i < 13; i++ {
+	for i := 0; i <= 13 - *week; i++ {
 		fmt.Printf(" %5d ", i)
+	}
+	if *week > 1 {
+		// Because of bye weeks, teams can have an additional win
+		fmt.Printf(" %5d ", 13 - *week + 1)
 	}
 	fmt.Println()
 
@@ -99,8 +104,12 @@ func main() {
 			t = t[:15]
 		}
 		fmt.Printf(" %15s ", t)
-		for _, p := range result.WinProbabilities {
-			fmt.Printf(" %5.3f ", p)
+		for i := 0; i <= 13 - *week; i++ {
+			fmt.Printf(" %5.3f ", result.WinProbabilities[i])
+		}
+		if *week > 1 {
+			// Because of bye weeks, teams can have an additional win
+			fmt.Printf(" %5.3f ", result.WinProbabilities[13 - *week + 1])
 		}
 		fmt.Println()
 	}
@@ -114,13 +123,13 @@ type teamResults struct {
 	WinProbabilities []float64
 }
 
-func worker(i int, jobs <-chan bts.Team, results chan<- teamResults, s bts.Schedule, r bts.Ratings, bias float64, std float64, hypervariance float64, nmc int) {
+func worker(i int, jobs <-chan bts.Team, results chan<- teamResults, s bts.Schedule, r bts.Ratings, bias float64, std float64, hypervariance float64) {
 	for t := range jobs {
-		results <- teamResults{Team: t, WinProbabilities: simulateWins(t, s, r, bias, std, hypervariance, nmc)}
+		results <- teamResults{Team: t, WinProbabilities: simulateWins(t, s, r, bias, std, hypervariance)}
 	}
 }
 
-func simulateWins(team bts.Team, s bts.Schedule, r bts.Ratings, bias, std, hypervariance float64, nmc int) []float64 {
+func simulateWins(team bts.Team, s bts.Schedule, r bts.Ratings, bias, std, hypervariance float64) []float64 {
 	winHist := make([]int, len(s[team]))
 
 	ratingNormal, err := prob.NewNormal(0, hypervariance)
@@ -128,7 +137,7 @@ func simulateWins(team bts.Team, s bts.Schedule, r bts.Ratings, bias, std, hyper
 		panic(err)
 	}
 
-	for i := 0; i < nmc; i++ {
+	for i := 0; i < *nMC; i++ {
 		// nudge ratings by a random amount
 		myRatings := make(bts.Ratings)
 		for t, rating := range r {
@@ -140,6 +149,7 @@ func simulateWins(team bts.Team, s bts.Schedule, r bts.Ratings, bias, std, hyper
 		if err != nil {
 			panic(err)
 		}
+		probs.FilterWeeks(*week)
 
 		// Simulate wins from probabilities
 		wins := 0
@@ -156,7 +166,7 @@ func simulateWins(team bts.Team, s bts.Schedule, r bts.Ratings, bias, std, hyper
 	// Normalize win counts
 	out := make([]float64, len(winHist))
 	for i, win := range winHist {
-		out[i] = float64(win) / float64(nmc)
+		out[i] = float64(win) / float64(*nMC)
 	}
 
 	return out
