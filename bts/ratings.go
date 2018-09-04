@@ -116,7 +116,7 @@ func ScrapeParameters(url string, modelName string) (float64, float64, error) {
 		return 0., 0., err
 	}
 
-	perfRegex := regexp.MustCompile(fmt.Sprintf("%s</font>.*?>[\\-0-9.]+<.*?>[\\-0-9.]+<.*?>[\\-0-9.]+<.*?>([\\-0-9.]+)<.*?>([\\-0-9.]+)<", regexp.QuoteMeta(modelName)))
+	perfRegex := regexp.MustCompile(fmt.Sprintf("%s</font>.*?<font size=2>[\\-0-9.]*</font>.*?<font size=2>[\\-0-9.]*</font>.*?<font size=2>[\\-0-9.]*</font>.*?<font size=2>([\\-0-9.]+)</font>.*?<font size=2>([\\-0-9.]+)</font>", regexp.QuoteMeta(modelName)))
 	perfStr := perfRegex.FindSubmatch(body)
 	if perfStr == nil {
 		return 0., 0., fmt.Errorf("unable to parse bais and mean squared error for model \"%s\" from \"%s\"", modelName, url)
