@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"sort"
+	"strings"
 
 	"runtime"
 
@@ -29,6 +31,25 @@ func makeNameMap(filename string) (nameMap, error) {
 	}
 
 	return nm, nil
+}
+
+type superdogGame struct {
+	GameModel bts.GameModel
+	Dog       string
+	Spread    float64
+	Prob      float64
+}
+
+type byDog []superdogGame
+
+func (s byDog) Len() int {
+	return len(s)
+}
+func (s byDog) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s byDog) Less(i, j int) bool {
+	return s[i].Dog < s[j].Dog
 }
 
 var numCPU = runtime.GOMAXPROCS(0)
@@ -74,41 +95,50 @@ func main() {
 
 	normal := prob.Normal{Mu: 0, Sigma: stdDev}
 
-	fmt.Println(" Home         Away         Underdog     Spread       p(superdog)  Value@3      Value@4      Value@5")
-	fmt.Println(" --------------------------------------------------------------------------------------------------")
+	// Make a sorted list of games and extract the length of the the longest team name
+	gameModels := make(byDog, 0)
+	maxNameLen := 0
 	for gm, line := range lines {
 		if gm.Model != *model {
 			continue
 		}
 		p := normal.Cdf(line + bias)
 
-		ht := gm.Game.HomeTeam
-		at := gm.Game.AwayTeam
-		if len(ht) > 12 {
-			ht = ht[:12]
-		}
-		if len(at) > 12 {
-			at = at[:12]
-		}
-		fmt.Printf(" %12s %12s", ht, at)
 		var ud string
 		var udp float64
 		if p < 0.5 {
-			ud = ht
+			ud = gm.Game.HomeTeam
 			udp = p
 		} else {
-			ud = at
+			ud = gm.Game.AwayTeam
 			udp = 1 - p
 		}
 
-		fmt.Printf(" %12s %12.2f %12.2f %12.2f %12.2f %12.2f\n", ud, line+bias, udp, udp*3, udp*4, udp*5)
-	}
+		gameModels = append(gameModels, superdogGame{GameModel: gm, Dog: ud, Prob: udp, Spread: line + bias})
 
-	// probs, spreads, err := ratings.MakeProbabilities(schedule, bias, stdDev)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// log.Printf("Made probabilities\n%s", probs)
-	// log.Printf("Made spreads\n%s", spreads)
+		if len(gm.Game.HomeTeam) > maxNameLen {
+			maxNameLen = len(gm.Game.HomeTeam)
+		}
+		if len(gm.Game.AwayTeam) > maxNameLen {
+			maxNameLen = len(gm.Game.AwayTeam)
+		}
+	}
+	sort.Sort(gameModels)
+
+	// Pretty print a table header
+	tableWidth := maxNameLen*3 + 6 + 5 + 4*3 + 2*7
+	fmt.Printf("%[1]*[2]s  %[1]*[3]s  %[1]*[4]s  %-6[5]s  %-5[6]s  %-4[7]s  %-4[8]s  %-4[9]s\n",
+		-maxNameLen, "Home", "Away", "Dog", "spread", "prob", "@3", "@4", "@5")
+	fmt.Printf("%s\n", strings.Repeat("-", tableWidth))
+
+	for _, gm := range gameModels {
+		ht := gm.GameModel.Game.HomeTeam
+		at := gm.GameModel.Game.AwayTeam
+		ud := gm.Dog
+		udp := gm.Prob
+		spread := gm.Spread
+		fmt.Printf("%[1]*[2]s  %[1]*[3]s  %[1]*[4]s  ", -maxNameLen, ht, at, ud)
+		fmt.Printf("%#+6.2f  %#5.3f  %#4.2f  %#4.2f  %#4.2f\n", spread, udp, udp*3, udp*4, udp*5)
+	}
 
 }
