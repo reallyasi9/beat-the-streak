@@ -9,6 +9,8 @@ import (
 
 type Schedule map[Team][]Team
 
+const NGames = 14
+
 func MakeSchedule(fileName string) (Schedule, error) {
 
 	schedYaml, err := ioutil.ReadFile(fileName)
@@ -23,8 +25,8 @@ func MakeSchedule(fileName string) (Schedule, error) {
 	}
 
 	for k, v := range s {
-		if len(v) != 13 {
-			return nil, fmt.Errorf("schedule for team %s incorrect: expected %d, got %d", k, 13, len(v))
+		if len(v) != NGames {
+			return nil, fmt.Errorf("schedule for team %s incorrect: expected %d, got %d", k, NGames, len(v))
 		}
 	}
 

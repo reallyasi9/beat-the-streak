@@ -1,5 +1,8 @@
 package bts
 
+import "fmt"
+
+// Team play game against Team.
 type Team string
 
 // TeamList implements the sort.Interface interface and represents a list of Teams.
@@ -20,12 +23,23 @@ func (t TeamList) Swap(i, j int) {
 	t[i], t[j] = t[j], t[i]
 }
 
+// Clone just clones the probabilities.
 func (t TeamList) Clone() TeamList {
 	out := make(TeamList, t.Len())
 	for i, team := range t {
 		out[i] = team
 	}
 	return out
+}
+
+// Validate a TeamList against a given Probabilities map.
+func (t TeamList) validate(p Probabilities) error {
+	for _, team := range t {
+		if _, ok := p[team]; !ok {
+			return fmt.Errorf("team '%s' not in probabilities", team)
+		}
+	}
+	return nil
 }
 
 // Probabilities returns the probabilities of the team list for the given order

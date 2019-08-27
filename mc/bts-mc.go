@@ -21,7 +21,7 @@ var scheduleFile = flag.String("schedule",
 	"schedule.yaml",
 	"YAML `file` containing B1G schedule")
 var remainingFile = flag.String("remaining", "remaining.yaml", "YAML `file` containing picks remaining for each contestant")
-var weekNumber = flag.Int("week", -1, "Week `number` [1-13]")
+var weekNumber = flag.Int("week", -1, "Week `number` (starting at 1)")
 var nTop = flag.Int("n", 5, "`number` of top probabilities to report for each player to check for better spreads")
 
 func main() {
@@ -39,7 +39,7 @@ func main() {
 		panic(err)
 	}
 	log.Printf("Scraped bias %f, standard dev %f", bias, stdDev)
-	log.Printf("Combined bias %f", bias + edge)
+	log.Printf("Combined bias %f", bias+edge)
 
 	schedule, err := bts.MakeSchedule(*scheduleFile)
 	if err != nil {
@@ -47,7 +47,7 @@ func main() {
 	}
 	log.Printf("Made schedule %v", schedule)
 
-	probs, spreads, err := ratings.MakeProbabilities(schedule, bias + edge, stdDev)
+	probs, spreads, err := ratings.MakeProbabilities(schedule, bias+edge, stdDev)
 	if err != nil {
 		panic(err)
 	}

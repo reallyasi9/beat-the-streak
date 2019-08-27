@@ -65,7 +65,7 @@ const theme = Theme(background_color=colorant"white",
 # Label the deltas
 const b1gDeltas = DataFrame([UTF8String, Int32, Float64], [:team, :week, :delta], 0)
 for t in b1gTeams
-  for w in 1:13
+  for w in 1:14
     delta = @ix(b1gdf, (:team .== t) & (:week .== w+1), :fpi)[1] - @ix(b1gdf, (:team .== t) & (:week .== w), :fpi)[1]
     append!(b1gDeltas, DataFrame(team=UTF8String(t), week=Int32(w), delta=Float64(delta)))
   end
