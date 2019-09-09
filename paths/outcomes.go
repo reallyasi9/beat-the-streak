@@ -25,8 +25,8 @@ func makeOutcomes(fn string) (*outcomes, error) {
 	}
 
 	for k, v := range o {
-		if len(v) != 13 {
-			return nil, fmt.Errorf("outcomes for team %s incorrect: expected 13, got %d", k, len(v))
+		if len(v) != NGames {
+			return nil, fmt.Errorf("outcomes for team %s incorrect: expected %d, got %d", k, NGames, len(v))
 		}
 	}
 

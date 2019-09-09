@@ -46,7 +46,7 @@ func (pm PlayerMap) InferWeek() (int, error) {
 			return -1, fmt.Errorf("player %s does not have a sensible number of teams remaining (%d)", name, nteams)
 		}
 	}
-	return 14 - min, nil
+	return NGames - min + 1, nil
 }
 
 func (pm PlayerMap) DoubleDownRemaining(week int) (map[string]bool, error) {
@@ -54,9 +54,9 @@ func (pm PlayerMap) DoubleDownRemaining(week int) (map[string]bool, error) {
 	for name, teams := range pm {
 		nteams := len(teams)
 		switch nteams {
-		case 14 - week:
+		case NGames - week + 1:
 			dd[name] = false
-		case 15 - week:
+		case NGames - week + 2:
 			dd[name] = true
 		default:
 			return nil, fmt.Errorf("player %s does not have a sensible number of teams remaining (%d)", name, nteams)

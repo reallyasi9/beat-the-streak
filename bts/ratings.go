@@ -55,8 +55,8 @@ func (r Ratings) MakeProbabilities(s Schedule, bias, stdDev float64) (Probabilit
 	spr := make(Spreads)
 
 	for team1, sched := range s {
-		p[team1] = make([]float64, 13)
-		spr[team1] = make([]float64, 13)
+		p[team1] = make([]float64, NGames)
+		spr[team1] = make([]float64, NGames)
 		for i, team2 := range sched {
 			if team2 == "" {
 				p[team1][i] = 0.

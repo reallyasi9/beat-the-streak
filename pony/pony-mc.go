@@ -87,12 +87,12 @@ func main() {
 
 	// Print the table header
 	fmt.Print(" Team      Wins: ")
-	for i := 0; i <= 13 - *week; i++ {
+	for i := 0; i <= bts.NGames-*week; i++ {
 		fmt.Printf(" %5d ", i)
 	}
 	if *week > 1 {
 		// Because of bye weeks, teams can have an additional win
-		fmt.Printf(" %5d ", 13 - *week + 1)
+		fmt.Printf(" %5d ", bts.NGames-*week+1)
 	}
 	fmt.Println()
 
@@ -104,12 +104,12 @@ func main() {
 			t = t[:15]
 		}
 		fmt.Printf(" %15s ", t)
-		for i := 0; i <= 13 - *week; i++ {
+		for i := 0; i <= bts.NGames-*week; i++ {
 			fmt.Printf(" %5.3f ", result.WinProbabilities[i])
 		}
 		if *week > 1 {
 			// Because of bye weeks, teams can have an additional win
-			fmt.Printf(" %5.3f ", result.WinProbabilities[13 - *week + 1])
+			fmt.Printf(" %5.3f ", result.WinProbabilities[bts.NGames-*week+1])
 		}
 		fmt.Println()
 	}
