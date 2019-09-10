@@ -5,14 +5,21 @@ import (
 	"testing"
 )
 
-func factorial(n int) *big.Int {
-	z := new(big.Int)
-	return z.MulRange(1, int64(n))
+func check(p1 []int, p2 []int) bool {
+	if len(p1) != len(p2) {
+		return false
+	}
+	for i := range p1 {
+		if p1[i] != p2[i] {
+			return false
+		}
+	}
+	return true
 }
 
-func TestIndexPermutor(t *testing.T) {
-	s := []int{0, 1, 2, 3, 4, 5}
-	p := NewIndexPermutor(6)
+func TestIdenticalPermutor(t *testing.T) {
+	s := []int{0, 0, 0, 1, 1, 2}
+	p := NewIdenticalPermutor(3, 2, 1)
 
 	// First should be identical
 	itr := p.Iterator()
@@ -27,10 +34,10 @@ func TestIndexPermutor(t *testing.T) {
 		t.Fatalf("expected different from %v, got %v", s, test)
 	}
 
-	s2 := []int{0, 1, 2}
-	p2 := NewIndexPermutor(3)
+	s2 := []int{1, 1, 1, 2}
+	p2 := NewIdenticalPermutor(0, 3, 1)
 
-	// Should be only 6 of these
+	// Should be only 4 of these
 	n := 0
 	itr2 := p2.Iterator()
 	for test = range itr2 {
@@ -38,8 +45,8 @@ func TestIndexPermutor(t *testing.T) {
 		n++
 	}
 
-	if n != 6 {
-		t.Fatalf("expected 6, got %v", n)
+	if n != 4 {
+		t.Fatalf("expected 4, got %v", n)
 	}
 
 	// Last should be different than first
@@ -47,23 +54,25 @@ func TestIndexPermutor(t *testing.T) {
 		t.Fatalf("expected different from %v, got %v", s2, test)
 	}
 
-	// Should be a! of these
-	p3 := NewIndexPermutor(6)
+	// Should be (a+b)!/a!/b! of these
+	p3 := NewIdenticalPermutor(2, 3)
 	n = 0
 	itr3 := p3.Iterator()
 	for test = range itr3 {
-		// t.Log(test)
+		t.Log(test)
 		n++
 	}
 
-	factest := factorial(6)
+	factest := factorial(2 + 3)
+	factest.Div(factest, factorial(2))
+	factest.Div(factest, factorial(3))
 	if factest.Cmp(big.NewInt(int64(n))) != 0 {
-		t.Fatalf("expected 6!, got %v", n)
+		t.Fatalf("expected 6!/2!/3!, got %v", n)
 	}
 }
 
-func BenchmarkPermuteAll10(b *testing.B) {
-	p := NewIndexPermutor(10)
+func BenchmarkIdenticalPermutor10(b *testing.B) {
+	p := NewIdenticalPermutor(4, 3, 3)
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
