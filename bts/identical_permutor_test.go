@@ -21,6 +21,11 @@ func TestIdenticalPermutor(t *testing.T) {
 	s := []int{0, 0, 0, 1, 1, 2}
 	p := NewIdenticalPermutor(3, 2, 1)
 
+	// Just in case
+	if p.Len() != 6 {
+		t.Errorf("expected %v, got %v", 6, p.Len())
+	}
+
 	// First should be identical
 	itr := p.Iterator()
 	test := <-itr
@@ -68,6 +73,10 @@ func TestIdenticalPermutor(t *testing.T) {
 	factest.Div(factest, factorial(3))
 	if factest.Cmp(big.NewInt(int64(n))) != 0 {
 		t.Fatalf("expected 6!/2!/3!, got %v", n)
+	}
+	nop := p3.NumberOfPermutations()
+	if factest.Cmp(nop) != 0 {
+		t.Errorf("expected %v, got %v", factest, nop)
 	}
 }
 

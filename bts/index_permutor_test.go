@@ -5,26 +5,26 @@ import (
 	"testing"
 )
 
-func factorial(n int) *big.Int {
-	z := new(big.Int)
-	return z.MulRange(1, int64(n))
-}
-
 func TestIndexPermutor(t *testing.T) {
 	s := []int{0, 1, 2, 3, 4, 5}
 	p := NewIndexPermutor(6)
+
+	// Just in case
+	if p.Len() != 6 {
+		t.Errorf("expected %v, got %v", 6, p.Len())
+	}
 
 	// First should be identical
 	itr := p.Iterator()
 	test := <-itr
 	if !check(s, test) {
-		t.Fatalf("expected %v, got %v", s, test)
+		t.Errorf("expected %v, got %v", s, test)
 	}
 
 	// Second should not be identical
 	test = <-itr
 	if check(s, test) {
-		t.Fatalf("expected different from %v, got %v", s, test)
+		t.Errorf("expected different from %v, got %v", s, test)
 	}
 
 	s2 := []int{0, 1, 2}
@@ -39,12 +39,12 @@ func TestIndexPermutor(t *testing.T) {
 	}
 
 	if n != 6 {
-		t.Fatalf("expected 6, got %v", n)
+		t.Errorf("expected 6, got %v", n)
 	}
 
 	// Last should be different than first
 	if check(s2, test) {
-		t.Fatalf("expected different from %v, got %v", s2, test)
+		t.Errorf("expected different from %v, got %v", s2, test)
 	}
 
 	// Should be a! of these
@@ -58,7 +58,11 @@ func TestIndexPermutor(t *testing.T) {
 
 	factest := factorial(6)
 	if factest.Cmp(big.NewInt(int64(n))) != 0 {
-		t.Fatalf("expected 6!, got %v", n)
+		t.Errorf("expected %v, got %v", factest, n)
+	}
+	nop := p3.NumberOfPermutations()
+	if factest.Cmp(nop) != 0 {
+		t.Errorf("expected %v, got %v", factest, nop)
 	}
 }
 
