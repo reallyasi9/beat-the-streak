@@ -1,86 +1,62 @@
 package bts
 
 import (
-	"bytes"
 	"fmt"
+	"strings"
 )
 
+// Streak represents a potential streak selection for a contestant.
 type Streak struct {
-	Teams TeamList
-	DD    *DoubleDown
+	weeks []TeamList
 }
 
-func (s *Streak) Clone() Streak {
-	t2 := s.Teams.Clone()
-	var dd2 *DoubleDown
-	if s.DD != nil {
-		dd2 = &DoubleDown{Team: s.DD.Team, Week: s.DD.Week}
+// NewStreak creates a Streak from a list of teams, a selected number of picks per week, and a permutation of the teams into the week.
+func NewStreak(teamList Remaining, picksPerWeek []int, indexPermutation []int) *Streak {
+	if len(indexPermutation) != len(teamList) {
+		panic(fmt.Errorf("number of teams in list %d must be equal to the indices in the permutation %d", len(teamList), len(indexPermutation)))
 	}
-	return Streak{Teams: t2, DD: dd2}
-}
-
-func (s *Streak) String(p Probabilities, spr Spreads, startWeek int) string {
-	var out bytes.Buffer
-	out.WriteString("[")
-
-	// Discover max team name length
-	maxLen := 0
-	for _, team := range s.Teams {
-		if len(team) > maxLen {
-			maxLen = len(team)
+	picks := make([]TeamList, len(picksPerWeek))
+	i := 0
+	for week, nPicks := range picksPerWeek {
+		picks[week] = make(TeamList, nPicks)
+		for p := 0; p < nPicks; p++ {
+			picks[week][p] = teamList[indexPermutation[i]]
+			i++
 		}
 	}
+	return &Streak{weeks: picks}
+}
 
-	// Lookup "*" in fmt documentation if you don't believe that this will work
-	for _, team := range s.Teams {
-		out.WriteString(fmt.Sprintf(" %-[1]*[2]s ", maxLen, team))
-	}
-	out.WriteString("]")
+// GetWeek returns the teams selected on a given week.
+func (s *Streak) GetWeek(week int) TeamList {
+	return s.weeks[week]
+}
 
-	if s.DD != nil {
-		out.WriteString(fmt.Sprintf(" %-[1]*[2]s @ Week %2[3]d", maxLen, s.DD.Team, s.DD.Week+startWeek))
+// FindTeam returns the week in which the given team was selected.
+func (s *Streak) FindTeam(team Team) int {
+	for week, picks := range s.weeks {
+		for _, pick := range picks {
+			if pick == team {
+				return week
+			}
+		}
 	}
-	out.WriteString("\n ")
+	return -1
+}
 
-	probs := s.Teams.Probabilities(p)
-	spreads := s.Teams.Spreads(spr)
-	sumSpread := 0.
-	totProb := 1.
-	for i := range s.Teams {
-		out.WriteString(fmt.Sprintf(" %-[1]*.4[2]f/%-5.1[3]f ", maxLen-6, probs[i], spreads[i]))
-		sumSpread += spreads[i]
-		totProb *= probs[i]
+// NumWeeks returns the number of weeks in the streak.
+func (s *Streak) NumWeeks() int {
+	return len(s.weeks)
+}
+
+func (s *Streak) String() string {
+	var out strings.Builder
+	for week, tl := range s.weeks {
+		out.WriteString(fmt.Sprintf("%2d: ", week))
+		for _, t := range tl {
+			out.WriteString(fmt.Sprintf("%-4s ", t.Shortened()))
+		}
+		out.WriteString("\n")
 	}
-	out.WriteRune(' ')
-	if s.DD != nil {
-		prob := p[s.DD.Team][s.DD.Week]
-		spread := spr[s.DD.Team][s.DD.Week]
-		out.WriteString(fmt.Sprintf("%-[1]*.4[2]f/%-5.1[3]f", maxLen-6, prob, spread))
-		sumSpread += spread
-		totProb *= prob
-	}
-	out.WriteString(fmt.Sprintf(" = %-[1]*.4[2]g/%-5.1[3]f", maxLen-6, totProb, sumSpread))
 	return out.String()
 }
-
-// StreakMap is a simple map of player names to streaks
-type StreakMap map[string]Streak
-
-type StreakProb struct {
-	Streak *Streak
-	Prob   float64
-}
-
-func StreakProbability(s *Streak, p Probabilities) StreakProb {
-	prob := s.Teams.Probability(p)
-	if s.DD != nil {
-		prob *= p[s.DD.Team][s.DD.Week]
-	}
-	return StreakProb{Streak: s, Prob: prob}
-}
-
-type StreaksByProb []StreakProb
-
-func (s StreaksByProb) Len() int           { return len(s) }
-func (s StreaksByProb) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-func (s StreaksByProb) Less(i, j int) bool { return s[i].Prob > s[j].Prob }

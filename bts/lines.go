@@ -9,7 +9,7 @@ import (
 
 // GameModel is a combined game and model for 2D lookup of lines
 type GameModel struct {
-	Game  Game
+	Game  *Game
 	Model string
 }
 
@@ -43,7 +43,7 @@ func MakeLines(url string) (LineMap, error) {
 			return nil, err
 		}
 
-		game := Game{HomeTeam: record[0], AwayTeam: record[1]}
+		game := NewGame(Team(record[0]), Team(record[1]), Neutral)
 
 		for i, line := range record[2:len(record)] {
 			model := models[i]
