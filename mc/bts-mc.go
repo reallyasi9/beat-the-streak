@@ -23,6 +23,7 @@ var scheduleFile = flag.String("schedule",
 	"schedule.yaml",
 	"YAML `file` containing B1G schedule")
 var remainingFile = flag.String("remaining", "remaining.yaml", "YAML `file` containing picks remaining for each contestant")
+var weekTypesFile = flag.String("weektypes", "weektypes_remaining.yaml", "YAML `file` containing week types remaining for each contestant")
 var weekNumber = flag.Int("week", 0, "Week `number` (starting at 0)")
 var nTop = flag.Int("n", 5, "`number` of top probabilities to report for each player to check for better spreads")
 
@@ -44,7 +45,7 @@ func main() {
 	predictions := bts.MakePredictions(schedule, *model)
 	log.Printf("Made predictions\n%s", predictions)
 
-	players, err := bts.MakePlayers(*remainingFile)
+	players, err := bts.MakePlayers(*remainingFile, *weekTypesFile)
 	if err != nil {
 		panic(err)
 	}
@@ -74,7 +75,20 @@ func main() {
 		}
 	}
 
-	// // Loop through the unique users
+	// Loop through the unique users
+	playerItr := playerIterator(players)
+	for player := range playerItr {
+		fmt.Println(player)
+		streaks := perPlayerTeamStreaks(player, predictions)
+		streakMaps := calculateBestStreaks(streaks)
+
+		for streak := range streakMaps {
+			for pt, sp := range streak {
+				fmt.Printf("%v: %f(%f)\n%v\n", pt.player, sp.prob, sp.spread, sp.streak)
+				// fmt.Println(sp)
+			}
+		}
+	}
 	// results := make(chan playerResult, len(players))
 	// jobs := make(chan namedPlayer, len(players))
 
@@ -174,43 +188,54 @@ type playerTeamStreakProb struct {
 	streakProb streakProb
 }
 
-// func perPlayerTeamStreaks() <-chan playerTeamStreakProb {
-// 	out := make(chan playerTeamStreakProb)
+func playerIterator(pm bts.PlayerMap) <-chan bts.Player {
+	out := make(chan bts.Player)
 
-// 	go func() {
-// 		defer close(out)
+	go func() {
+		defer close(out)
 
-// 		for player, remaining := range players {
-// 			for weekOrder := range weekItr {
-// 				for teamOrder := range teamItr {
-// 					streak := bts.NewStreak(remaining, weekOrder, teamOrder)
-// 					prob, spread := bts.SummarizeStreak(predictions, streak)
-// 					for _, team := range streak.GetWeek(0) {
-// 						sp := streakProb{streak: streak, prob: prob, spread: spread}
-// 						out <- playerTeamStreakProb{player: player, team: team, streakProb: sp}
-// 					}
-// 				}
-// 			}
-// 		}
-// 	}()
+		for _, player := range pm {
+			out <- player
+		}
+	}()
 
-// 	return out
-// }
+	return out
+}
 
-// func calculateBestStreaks() <-chan streakMap {
-// 	out := make(chan streakMap)
+func perPlayerTeamStreaks(p bts.Player, predictions *bts.Predictions) <-chan playerTeamStreakProb {
+	out := make(chan playerTeamStreakProb)
 
-// 	sm := make(streakMap)
-// 	go func() {
-// 		defer close(out)
+	go func() {
+		defer close(out)
 
-// 		playerChan := perPlayerTeamStreaks()
-// 		for ptsp := range playerChan {
-// 			sm.update(ptsp.player, ptsp.team, ptsp.streakProb)
-// 		}
+		for weekOrder := range p.WeekTypeIterator() {
+			for teamOrder := range p.RemainingIterator() {
+				streak := bts.NewStreak(p.RemainingTeams(), weekOrder, teamOrder)
+				prob, spread := bts.SummarizeStreak(predictions, streak)
+				for _, team := range streak.GetWeek(0) {
+					sp := streakProb{streak: streak, prob: prob, spread: spread}
+					out <- playerTeamStreakProb{player: p.Name(), team: team, streakProb: sp}
+				}
+			}
+		}
+	}()
 
-// 		out <- sm
-// 	}()
+	return out
+}
 
-// 	return out
-// }
+func calculateBestStreaks(ppts <-chan playerTeamStreakProb) <-chan streakMap {
+	out := make(chan streakMap)
+
+	sm := make(streakMap)
+	go func() {
+		defer close(out)
+
+		for ptsp := range ppts {
+			sm.update(ptsp.player, ptsp.team, ptsp.streakProb)
+		}
+
+		out <- sm
+	}()
+
+	return out
+}

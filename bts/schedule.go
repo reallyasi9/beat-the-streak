@@ -111,7 +111,11 @@ func (s Schedule) String() string {
 			case Neutral:
 				extra = '!'
 			}
-			b.WriteRune(extra)
+			if g.Team(1) != BYE {
+				b.WriteRune(extra)
+			} else {
+				b.WriteRune(' ')
+			}
 			b.WriteString(fmt.Sprintf("%-4s ", g.Team(1).Shortened()))
 		}
 		b.WriteString("\n")
