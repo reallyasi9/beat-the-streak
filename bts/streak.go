@@ -19,6 +19,11 @@ func NewStreak(teamList Remaining, picksPerWeek []int, indexPermutation []int) *
 	i := 0
 	for week, nPicks := range picksPerWeek {
 		picks[week] = make(TeamList, nPicks)
+		if nPicks == 0 {
+			// No pick--bye used
+			picks[week] = append(picks[week], NONE)
+			continue
+		}
 		for p := 0; p < nPicks; p++ {
 			if i > len(indexPermutation) {
 				panic(fmt.Errorf("sum total of picks per week must not surpass number of teams remaining %d", len(indexPermutation)))

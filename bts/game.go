@@ -29,6 +29,9 @@ type Game struct {
 	location RelativeLocation
 }
 
+// NULLGAME represents a game that doesn't exsit.  Go figure.
+var NULLGAME = Game{NONE, NONE, Neutral}
+
 // NewGame makes a game between two teams.
 func NewGame(team1, team2 Team, locRelTeam1 RelativeLocation) *Game {
 	return &Game{team1: team1, team2: team2, location: locRelTeam1}

@@ -14,6 +14,9 @@ type TeamList []Team
 // BYE represents a bye week for a team in a schedule.
 const BYE = Team("BYE")
 
+// NONE represents a null pick--used when a player uses a pick bye on a week.
+const NONE = Team("----")
+
 // Len calculates the length of the TeamList (implements sort.Interface interface)
 func (t TeamList) Len() int {
 	return len(t)
@@ -56,18 +59,39 @@ func maxSlice(s string, max int) string {
 	return s[:end]
 }
 
+var teamNicknames = map[string]string{
+	"ILLINOIS":     "ILL",
+	"INDIANA":      "IND",
+	"IOWA":         "IOWA",
+	"MARYLAND":     "UMD",
+	"MICHIGAN":     "MICH",
+	"MICHIGAN ST":  "MSU",
+	"MINNESOTA":    "MINN",
+	"NEBRASKA":     "NEB",
+	"NORTHWESTERN": "NU",
+	"OHIO STATE":   "OSU",
+	"PENN STATE":   "PSU",
+	"PURDUE":       "PUR",
+	"RUTGERS":      "RUT",
+	"WISCONSIN":    "WISC",
+}
+
 // Shortened returnes a shortened version of the team name for easier display (max 4 characters, all upper case).
 func (t Team) Shortened() string {
-	split := strings.SplitN(string(t), " ", 4)
+	upper := strings.ToUpper(string(t))
+	if nick, ok := teamNicknames[upper]; ok {
+		return nick
+	}
+	split := strings.SplitN(upper, " ", 4)
 	var b strings.Builder
 	switch len(split) {
 	case 0:
 		return "BYE"
 	case 1:
-		return strings.ToUpper(maxSlice(split[0], 4))
+		return maxSlice(split[0], 4)
 	case 2:
-		b.WriteString(strings.ToUpper(maxSlice(split[0], 2)))
-		b.WriteString(strings.ToUpper(maxSlice(split[1], 2)))
+		b.WriteString(maxSlice(split[0], 2))
+		b.WriteString(maxSlice(split[1], 2))
 		return b.String()
 	default:
 		n := 4
@@ -75,7 +99,7 @@ func (t Team) Shortened() string {
 			n = len(split)
 		}
 		for i := 0; i < n; i++ {
-			b.WriteString(strings.ToUpper(maxSlice(split[i], 1)))
+			b.WriteString(maxSlice(split[i], 1))
 		}
 		return b.String()
 	}

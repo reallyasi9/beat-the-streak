@@ -37,12 +37,21 @@ func (p *Predictions) FilterWeeks(w int) {
 // GetProbability returns the probability that the given team wins in the given week.
 // Bye weeks have a probability of 1.
 func (p *Predictions) GetProbability(team Team, week int) float64 {
+	if team == NONE {
+		return 1.
+	}
+	if team == BYE {
+		return 0.
+	}
 	return p.probs[team][week]
 }
 
 // GetSpread returns the predicted spread for a given team in a given week.
 // Teams on bye weeks are given a spread of 0.
 func (p *Predictions) GetSpread(team Team, week int) float64 {
+	if team == NONE || team == BYE {
+		return 0.
+	}
 	return p.spreads[team][week]
 }
 

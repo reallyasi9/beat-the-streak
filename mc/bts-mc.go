@@ -1,18 +1,18 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"math"
+	"sort"
 	"sync"
-
-	"runtime"
+	"time"
 
 	"../bts"
 )
 
-var numCPU = runtime.GOMAXPROCS(0)
 var ratingsURL = flag.String("ratings",
 	"http://sagarin.com/sports/cfsend.htm",
 	"`URL` of Sagarin ratings for calculating probabilities of win")
@@ -26,6 +26,8 @@ var remainingFile = flag.String("remaining", "remaining.yaml", "YAML `file` cont
 var weekTypesFile = flag.String("weektypes", "weektypes_remaining.yaml", "YAML `file` containing week types remaining for each contestant")
 var weekNumber = flag.Int("week", 0, "Week `number` (starting at 0)")
 var nTop = flag.Int("n", 5, "`number` of top probabilities to report for each player to check for better spreads")
+
+var startTime = time.Now()
 
 func main() {
 	flag.Parse()
@@ -61,6 +63,9 @@ func main() {
 
 	log.Printf("The following users have not yet been eliminated: %v", players)
 
+	schedule.FilterWeeks(*weekNumber)
+	log.Printf("Filtered schedule:\n%s", schedule)
+
 	predictions.FilterWeeks(*weekNumber)
 	log.Printf("Filtered predictions:\n%s", predictions)
 
@@ -77,47 +82,21 @@ func main() {
 
 	// Loop through the unique users
 	playerItr := playerIterator(players)
-	for player := range playerItr {
-		fmt.Println(player)
-		streaks := perPlayerTeamStreaks(player, predictions)
-		streakMaps := calculateBestStreaks(streaks)
 
-		for streak := range streakMaps {
-			for pt, sp := range streak {
-				fmt.Printf("%v: %f(%f)\n%v\n", pt.player, sp.prob, sp.spread, sp.streak)
-				// fmt.Println(sp)
-			}
-		}
+	// Loop through streaks
+	ppts := perPlayerTeamStreaks(playerItr, predictions)
+
+	// Update best
+	bestStreaks := calculateBestStreaks(ppts)
+
+	// Collect by player
+	streakOptions := collectByPlayer(bestStreaks, players, predictions, schedule)
+
+	// Print results
+	for _, streak := range streakOptions {
+		j, _ := json.Marshal(streak)
+		fmt.Println(string(j))
 	}
-	// results := make(chan playerResult, len(players))
-	// jobs := make(chan namedPlayer, len(players))
-
-	// for i := 0; i < runtime.NumCPU(); i++ {
-	// 	go worker(i, jobs, results, probs, *nTop)
-	// }
-
-	// for user, remainingTeams := range players {
-	// 	jobs <- namedPlayer{Player: user, DD: ddusers[user], Teams: remainingTeams}
-	// }
-	// close(jobs)
-
-	// // Drain the results now
-	// for range players {
-	// 	result := <-results
-	// 	fmt.Printf("%s", result.Player)
-	// 	if _, ok := duplicates[result.Player]; ok {
-	// 		fmt.Printf(" (clones %v)", duplicates[result.Player])
-	// 	}
-	// 	fmt.Println()
-	// 	for _, res := range result.Result {
-	// 		if res.Streak == nil {
-	// 			continue
-	// 		}
-	// 		fmt.Println(res.Streak.String(probs, spreads, *weekNumber))
-	// 	}
-	// }
-
-	// close(results)
 
 }
 
@@ -163,27 +142,8 @@ func (sm streakMap) getBest(player string) streakProb {
 	return sm[playerTeam{player: player, team: bestt}]
 }
 
-func mergeWait(cs ...<-chan int) <-chan int {
-	out := make(chan int)
-	var wg sync.WaitGroup
-	wg.Add(len(cs))
-	for _, c := range cs {
-		go func(c <-chan int) {
-			for v := range c {
-				out <- v
-			}
-			wg.Done()
-		}(c)
-	}
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
-	return out
-}
-
 type playerTeamStreakProb struct {
-	player     string
+	player     bts.Player
 	team       bts.Team
 	streakProb streakProb
 }
@@ -202,22 +162,37 @@ func playerIterator(pm bts.PlayerMap) <-chan bts.Player {
 	return out
 }
 
-func perPlayerTeamStreaks(p bts.Player, predictions *bts.Predictions) <-chan playerTeamStreakProb {
+func perPlayerTeamStreaks(ps <-chan bts.Player, predictions *bts.Predictions) <-chan playerTeamStreakProb {
+
 	out := make(chan playerTeamStreakProb)
 
 	go func() {
-		defer close(out)
+		var wg sync.WaitGroup
 
-		for weekOrder := range p.WeekTypeIterator() {
-			for teamOrder := range p.RemainingIterator() {
-				streak := bts.NewStreak(p.RemainingTeams(), weekOrder, teamOrder)
-				prob, spread := bts.SummarizeStreak(predictions, streak)
-				for _, team := range streak.GetWeek(0) {
-					sp := streakProb{streak: streak, prob: prob, spread: spread}
-					out <- playerTeamStreakProb{player: p.Name(), team: team, streakProb: sp}
+		for p := range ps {
+			wg.Add(1)
+
+			go func(p bts.Player) {
+				for weekOrder := range p.WeekTypeIterator() {
+					for teamOrder := range p.RemainingIterator() {
+						streak := bts.NewStreak(p.RemainingTeams(), weekOrder, teamOrder)
+						prob, spread := bts.SummarizeStreak(predictions, streak)
+						if prob <= 0 {
+							// Ignore streaks that guarantee a loss.
+							continue
+						}
+						for _, team := range streak.GetWeek(0) {
+							sp := streakProb{streak: streak, prob: prob, spread: spread}
+							out <- playerTeamStreakProb{player: p, team: team, streakProb: sp}
+						}
+					}
 				}
-			}
+				wg.Done()
+			}(p)
+
 		}
+		wg.Wait()
+		close(out)
 	}()
 
 	return out
@@ -231,11 +206,92 @@ func calculateBestStreaks(ppts <-chan playerTeamStreakProb) <-chan streakMap {
 		defer close(out)
 
 		for ptsp := range ppts {
-			sm.update(ptsp.player, ptsp.team, ptsp.streakProb)
+			sm.update(ptsp.player.Name(), ptsp.team, ptsp.streakProb)
 		}
 
 		out <- sm
 	}()
 
 	return out
+}
+
+func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *bts.Predictions, schedule *bts.Schedule) []PlayerResults {
+
+	// Collect streak options by player
+	soByPlayer := make(map[string][]StreakOption)
+	for sm := range sms {
+
+		for pt, sp := range sm {
+
+			firstTeam := pt.team
+			cProb, cSpread := bts.AccumulateStreak(predictions, sp.streak)
+			prob := sp.prob
+			spread := sp.spread
+
+			weeks := make([]Week, sp.streak.NumWeeks())
+			for iweek := 0; iweek < sp.streak.NumWeeks(); iweek++ {
+
+				seasonWeek := iweek + *weekNumber
+				weekProbability := 1.
+				weekSpread := 0.
+
+				picks := make([]Pick, 0)
+				for _, team := range sp.streak.GetWeek(iweek) {
+					probability := predictions.GetProbability(team, iweek)
+					spread := predictions.GetSpread(team, iweek)
+					opponent := schedule.Get(team, iweek).Team(1)
+
+					picks = append(picks, Pick{Selected: team, Opponent: opponent, Probability: probability, Spread: spread})
+
+					weekProbability *= probability
+					weekSpread += spread
+				}
+
+				weeks[iweek] = Week{Picks: picks, SeasonWeek: seasonWeek, Probability: weekProbability, Spread: weekSpread}
+
+			}
+
+			so := StreakOption{FirstSelected: firstTeam, Weeks: weeks, CumulativeProbability: cProb, CumulativeSpread: cSpread, Probability: prob, Spread: spread}
+			if sos, ok := soByPlayer[pt.player]; ok {
+				soByPlayer[pt.player] = append(sos, so)
+			} else {
+				soByPlayer[pt.player] = []StreakOption{so}
+			}
+
+		}
+
+	}
+
+	// Run through players and calculate best option
+	prs := make([]PlayerResults, 0)
+	for player, streakOptions := range soByPlayer {
+
+		if len(streakOptions) == 0 {
+			continue
+		}
+
+		sort.Sort(ByProbDesc(streakOptions))
+
+		bestSelection := make([]bts.Team, 0)
+		for _, pick := range streakOptions[0].Weeks[0].Picks {
+			bestSelection = append(bestSelection, pick.Selected)
+		}
+		bestProb := streakOptions[0].Probability
+		bestSpread := streakOptions[0].Spread
+
+		prs = append(prs, PlayerResults{
+			Player:               player,
+			StartingWeek:         *weekNumber,
+			CalculationStartTime: startTime,
+			CalculationEndTime:   time.Now(),
+			RemainingTeams:       players[player].RemainingTeams(),
+			RemainingWeekTypes:   players[player].RemainingWeekTypes(),
+			BestSelection:        bestSelection,
+			BestProbability:      bestProb,
+			BestSpread:           bestSpread,
+			StreakOptions:        streakOptions,
+		})
+	}
+
+	return prs
 }

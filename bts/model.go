@@ -35,6 +35,9 @@ func (m GaussianSpreadModel) Predict(game *Game) (float64, float64) {
 	if game.Team(0) == BYE || game.Team(1) == BYE {
 		return 0., 0.
 	}
+	if game.Team(0) == NONE || game.Team(1) == NONE {
+		return 1., 0.
+	}
 	spread := m.spread(game)
 	prob := m.dist.Cdf(spread)
 
@@ -45,6 +48,9 @@ func (m GaussianSpreadModel) Predict(game *Game) (float64, float64) {
 func (m GaussianSpreadModel) MostLikelyOutcome(game *Game) (Team, float64, float64) {
 	if game.Team(0) == BYE || game.Team(1) == BYE {
 		return BYE, 0., 0.
+	}
+	if game.Team(0) == NONE || game.Team(1) == NONE {
+		return NONE, 1., 0.
 	}
 	prob, spread := m.Predict(game)
 	if spread < 0 {

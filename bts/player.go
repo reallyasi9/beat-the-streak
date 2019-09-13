@@ -27,6 +27,11 @@ func (p Player) RemainingTeams() Remaining {
 	return p.remaining
 }
 
+// RemainingWeekTypes returns the list of remaining week types.
+func (p Player) RemainingWeekTypes() []int {
+	return p.weekTypes.sets
+}
+
 // RemainingIterator returns an iterator over remaining team indices.
 func (p Player) RemainingIterator() <-chan []int {
 	return NewIndexPermutor(len(p.remaining)).Iterator()

@@ -44,6 +44,10 @@ func MakeSchedule(fileName string) (*Schedule, error) {
 
 // Get a game for a team and week number.
 func (s Schedule) Get(t Team, w int) *Game {
+	if t == NONE {
+		// Picking no team is strange
+		return &NULLGAME
+	}
 	return s[t][w]
 }
 
@@ -53,6 +57,16 @@ func (s Schedule) NumWeeks() int {
 		return len(v)
 	}
 	return 0
+}
+
+// FilterWeeks filters the Predictions by removing weeks prior to the given one.
+func (s *Schedule) FilterWeeks(w int) {
+	if w <= 0 {
+		return
+	}
+	for team := range *s {
+		(*s)[team] = (*s)[team][w:]
+	}
 }
 
 // TeamList generates a list of first-level teams from the schedule.
