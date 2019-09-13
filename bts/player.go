@@ -52,7 +52,24 @@ type RemainingMap map[string]Remaining
 type WeeksMap map[string][]int
 
 // PlayerMap associates a player's name with a status.
-type PlayerMap map[string]Player
+type PlayerMap map[string]*Player
+
+// NewPlayer builds a new player
+func NewPlayer(name string, remaining Remaining, weekTypesRemaining []int) (*Player, error) {
+	nTeams := len(remaining)
+	nPicks := 0
+	for itype, ntype := range weekTypesRemaining {
+		nPicks += itype * ntype
+	}
+	if nPicks != nTeams {
+		return nil, fmt.Errorf("number of teams remaining (%d) must equal number of picks remaining (%d)", nTeams, nPicks)
+	}
+	return &Player{
+		name:      name,
+		remaining: remaining,
+		weekTypes: NewIdenticalPermutor(weekTypesRemaining...),
+	}, nil
+}
 
 // MakePlayers parses a YAML file and produces a map of remaining players.
 func MakePlayers(playerFile string, weekTypeFile string) (PlayerMap, error) {
@@ -80,7 +97,11 @@ func MakePlayers(playerFile string, weekTypeFile string) (PlayerMap, error) {
 
 	pm := make(PlayerMap)
 	for p, r := range rm {
-		pm[p] = Player{name: p, remaining: r, weekTypes: NewIdenticalPermutor(wm[p]...)}
+		var err error
+		pm[p], err = NewPlayer(p, r, wm[p])
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return pm, nil
