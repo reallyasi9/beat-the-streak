@@ -13,6 +13,13 @@ import (
 	"../bts"
 )
 
+func check(err error) {
+	if err != nil {
+		log.Fatal(err)
+		panic(err)
+	}
+}
+
 var ratingsURL = flag.String("ratings",
 	"http://sagarin.com/sports/cfsend.htm",
 	"`URL` of Sagarin ratings for calculating probabilities of win")
@@ -33,30 +40,27 @@ func main() {
 	flag.Parse()
 
 	model, err := bts.MakeGaussianSpreadModel(*ratingsURL, *performanceURL, "Sagarin Points")
-	if err != nil {
-		panic(err)
-	}
+	check(err)
 	log.Printf("Downloaded model %v", model)
 
 	schedule, err := bts.MakeSchedule(*scheduleFile)
-	if err != nil {
-		panic(err)
-	}
+	check(err)
 	log.Printf("Made schedule\n%v", schedule)
 
 	predictions := bts.MakePredictions(schedule, *model)
 	log.Printf("Made predictions\n%s", predictions)
 
 	players, err := bts.MakePlayers(*remainingFile, *weekTypesFile)
-	if err != nil {
-		panic(err)
-	}
+	check(err)
 	log.Printf("Made players %v", players)
 
 	// Determine week number, if needed
 	if *weekNumber < 0 {
-		panic(fmt.Errorf("week number must be greater than or equal to zero, got %d", *weekNumber))
+		log.Print("attempting to determine week number from input data")
+		// *weekNumber = determineWeekNumber()
 	}
+	// err = validateWeekNumber(*weekNumber)
+	check(err)
 	log.Printf("Week number %d", *weekNumber)
 
 	// Determine double-down users
