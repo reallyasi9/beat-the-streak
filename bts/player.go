@@ -32,6 +32,15 @@ func (p Player) RemainingWeekTypes() []int {
 	return p.weekTypes.sets
 }
 
+// RemainingWeeks calculates the number of weeks of picks this player has remaining.
+func (p Player) RemainingWeeks() int {
+	nWeeks := 0
+	for _, ntype := range p.RemainingWeekTypes() {
+		nWeeks += ntype
+	}
+	return nWeeks
+}
+
 // RemainingIterator returns an iterator over remaining team indices.
 func (p Player) RemainingIterator() <-chan []int {
 	return NewIndexPermutor(len(p.remaining)).Iterator()
@@ -84,15 +93,27 @@ func MakePlayers(playerFile string, weekTypeFile string) (PlayerMap, error) {
 		return nil, err
 	}
 
-	weeksYaml, err := ioutil.ReadFile(weekTypeFile)
-	if err != nil {
-		return nil, err
-	}
-
+	// Figure out week types if necessary
 	wm := make(WeeksMap)
-	err = yaml.Unmarshal(weeksYaml, wm)
-	if err != nil {
-		return nil, err
+	if weekTypeFile == "" {
+		nRemaining := -1
+		for name, remaining := range rm {
+			if nRemaining > 0 && len(remaining) != nRemaining {
+				return nil, fmt.Errorf("number of remaining teams inconsistent: must specify a weeks-remaining file")
+			}
+			nRemaining = len(remaining)
+			wm[name] = []int{0, nRemaining}
+		}
+	} else {
+		weeksYaml, err := ioutil.ReadFile(weekTypeFile)
+		if err != nil {
+			return nil, err
+		}
+
+		err = yaml.Unmarshal(weeksYaml, wm)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	pm := make(PlayerMap)

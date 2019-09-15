@@ -30,8 +30,8 @@ var scheduleFile = flag.String("schedule",
 	"schedule.yaml",
 	"YAML `file` containing B1G schedule")
 var remainingFile = flag.String("remaining", "remaining.yaml", "YAML `file` containing picks remaining for each contestant")
-var weekTypesFile = flag.String("weektypes", "weektypes_remaining.yaml", "YAML `file` containing week types remaining for each contestant")
-var weekNumber = flag.Int("week", 0, "Week `number` (starting at 0)")
+var weekTypesFile = flag.String("weektypes", "", "YAML `file` containing week types remaining for each contestant")
+var weekNumber = flag.Int("week", -1, "Week `number` (starting at 0)")
 var nTop = flag.Int("n", 5, "`number` of top probabilities to report for each player to check for better spreads")
 
 var startTime = time.Now()
@@ -50,22 +50,25 @@ func main() {
 	predictions := bts.MakePredictions(schedule, *model)
 	log.Printf("Made predictions\n%s", predictions)
 
+	// Figure out week types if necessary
+	if *weekTypesFile == "" {
+		log.Print("No week-type file given, assuming no byes/n-downs")
+	}
+
 	players, err := bts.MakePlayers(*remainingFile, *weekTypesFile)
 	check(err)
 	log.Printf("Made players %v", players)
 
+	log.Printf("The following users have not yet been eliminated: %v", players)
+
 	// Determine week number, if needed
 	if *weekNumber < 0 {
-		log.Print("attempting to determine week number from input data")
-		// *weekNumber = determineWeekNumber()
+		log.Print("Valid week number not given: attempting to determine week number from input data")
+		*weekNumber = determineWeekNumber(players, schedule)
 	}
-	// err = validateWeekNumber(*weekNumber)
-	check(err)
+	// err = validateWeekNumber(*weekNumber, players)
+	// check(err)
 	log.Printf("Week number %d", *weekNumber)
-
-	// Determine double-down users
-
-	log.Printf("The following users have not yet been eliminated: %v", players)
 
 	schedule.FilterWeeks(*weekNumber)
 	log.Printf("Filtered schedule:\n%s", schedule)
@@ -147,13 +150,13 @@ func (sm streakMap) getBest(player string) streakProb {
 }
 
 type playerTeamStreakProb struct {
-	player     bts.Player
+	player     *bts.Player
 	team       bts.Team
 	streakProb streakProb
 }
 
-func playerIterator(pm bts.PlayerMap) <-chan bts.Player {
-	out := make(chan bts.Player)
+func playerIterator(pm bts.PlayerMap) <-chan *bts.Player {
+	out := make(chan *bts.Player)
 
 	go func() {
 		defer close(out)
@@ -166,7 +169,7 @@ func playerIterator(pm bts.PlayerMap) <-chan bts.Player {
 	return out
 }
 
-func perPlayerTeamStreaks(ps <-chan bts.Player, predictions *bts.Predictions) <-chan playerTeamStreakProb {
+func perPlayerTeamStreaks(ps <-chan *bts.Player, predictions *bts.Predictions) <-chan playerTeamStreakProb {
 
 	out := make(chan playerTeamStreakProb)
 
@@ -176,7 +179,7 @@ func perPlayerTeamStreaks(ps <-chan bts.Player, predictions *bts.Predictions) <-
 		for p := range ps {
 			wg.Add(1)
 
-			go func(p bts.Player) {
+			go func(p *bts.Player) {
 				for weekOrder := range p.WeekTypeIterator() {
 					for teamOrder := range p.RemainingIterator() {
 						streak := bts.NewStreak(p.RemainingTeams(), weekOrder, teamOrder)
@@ -298,4 +301,17 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 	}
 
 	return prs
+}
+
+func determineWeekNumber(players bts.PlayerMap, schedule *bts.Schedule) int {
+	guess := -1
+	for name, player := range players {
+		thisGuess := player.RemainingWeeks()
+		if guess >= 0 && thisGuess != guess {
+			panic(fmt.Errorf("player %s has an invalid number of weeks remaining: expected %d, found %d", name, thisGuess, guess))
+		}
+		guess = thisGuess
+	}
+	week := schedule.NumWeeks() - guess
+	return week
 }

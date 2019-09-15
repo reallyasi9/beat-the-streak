@@ -60,20 +60,22 @@ func maxSlice(s string, max int) string {
 }
 
 var teamNicknames = map[string]string{
-	"ILLINOIS":     "ILL",
-	"INDIANA":      "IND",
-	"IOWA":         "IOWA",
-	"MARYLAND":     "UMD",
-	"MICHIGAN":     "MICH",
-	"MICHIGAN ST":  "MSU",
-	"MINNESOTA":    "MINN",
-	"NEBRASKA":     "NEB",
-	"NORTHWESTERN": "NU",
-	"OHIO STATE":   "OSU",
-	"PENN STATE":   "PSU",
-	"PURDUE":       "PUR",
-	"RUTGERS":      "RUT",
-	"WISCONSIN":    "WISC",
+	"ILLINOIS":       "ILL",
+	"INDIANA":        "IND",
+	"IOWA":           "IOWA",
+	"MARYLAND":       "UMD",
+	"MICHIGAN":       "MICH",
+	"MICHIGAN STATE": "MSU",
+	"MINNESOTA":      "MINN",
+	"NEBRASKA":       "NEB",
+	"NORTHWESTERN":   "NU",
+	"OHIO STATE":     "OSU",
+	"PENN STATE":     "PSU",
+	"PURDUE":         "PUR",
+	"RUTGERS":        "RUT",
+	"WISCONSIN":      "WISC",
+	"NOTRE DAME":     "ND",
+	"MIAMI-OHIO":     "NTM",
 }
 
 // Shortened returnes a shortened version of the team name for easier display (max 4 characters, all upper case).
