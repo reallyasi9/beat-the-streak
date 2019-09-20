@@ -1,0 +1,17 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+pylint = "*"
+
+[packages]
+google-cloud-firestore = "*"
+google-cloud-error-reporting = "*"
+absl-py = "*"
+python-dateutil = "*"
+bs4 = "*"
+
+[requires]
+python_version = "3.7"
