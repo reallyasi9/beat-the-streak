@@ -47,6 +47,8 @@ def parse_sagarin(url):
     # Not when the firestore was updated, but when the prediction was downloaded
     timestamp = datetime.datetime.now(datetime.timezone.utc)
 
+    logging.info("download ratings from %s", url)
+
     with urlopen(url, context=myssl) as u:
         text = u.read().decode("utf-8")
         
@@ -145,10 +147,12 @@ def pubsub(event, context):
     """
     import base64
 
-    if 'attributes' in event and 'resource' in event['attributes']:
-        ratings = event['attributes']['resource']
-    elif 'data' in event:
+    logging.info(f"triggered with pubsub event {event}")
+
+    if 'data' in event and event['data']:
         ratings = base64.b64decode(event['data']).decode('utf-8')
+    elif 'attributes' in event and event['attributes'] and 'resource' in event['attributes']:
+        ratings = event['attributes']['resource']
     else:
         ratings = SAGARIN_URL
     parse_sagarin(ratings)
