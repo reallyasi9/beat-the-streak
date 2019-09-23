@@ -101,6 +101,7 @@ def parse_sagarin(url):
     doc_ref = sags_ref.document()
     doc_ref.set({
         "timestamp": timestamp,
+        "home_advantage": home_adv,
         })
     
     ratings_ref = doc_ref.collection("ratings")
@@ -144,7 +145,9 @@ def pubsub(event, context):
     """
     import base64
 
-    if 'data' in event:
+    if 'attributes' in event and 'resource' in event['attributes']:
+        ratings = event['attributes']['resource']
+    elif 'data' in event:
         ratings = base64.b64decode(event['data']).decode('utf-8')
     else:
         ratings = SAGARIN_URL
