@@ -151,8 +151,8 @@ def pubsub(event, context):
 
     if 'data' in event and event['data']:
         ratings = base64.b64decode(event['data']).decode('utf-8')
-    elif 'attributes' in event and event['attributes'] and 'resource' in event['attributes']:
-        ratings = event['attributes']['resource']
+    elif 'attributes' in event and event['attributes'] and 'ratings' in event['attributes']:
+        ratings = event['attributes']['ratings']
     else:
         ratings = SAGARIN_URL
     parse_sagarin(ratings)
