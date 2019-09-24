@@ -5,6 +5,7 @@ verify_ssl = true
 
 [dev-packages]
 pylint = "*"
+pyyaml = "*"
 
 [packages]
 google-cloud-firestore = "*"
