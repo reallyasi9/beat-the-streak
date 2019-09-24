@@ -4,6 +4,7 @@ from urllib.request import urlopen
 import re
 import ssl
 import datetime
+from dateutil.parser import parse
 
 FS = firestore.Client()
 ER = error_reporting.Client()
@@ -34,7 +35,7 @@ def search_long(long):
 flags.DEFINE_string("ratings", SAGARIN_URL, "URL of Sagarin Ratings output to parse.")
 
 
-def parse_sagarin(url):
+def parse_sagarin(url, meta):
 
     # why, Sagarin?
     myssl = ssl.create_default_context()
@@ -43,9 +44,6 @@ def parse_sagarin(url):
 
     home_adv = 0
     ratings = {}
-
-    # Not when the firestore was updated, but when the prediction was downloaded
-    timestamp = datetime.datetime.now(datetime.timezone.utc)
 
     logging.info("download ratings from %s", url)
 
@@ -84,7 +82,7 @@ def parse_sagarin(url):
             continue
         
         if len(found) > 1:
-            err = f"team name `{team}` ambiguous: found {docs}"
+            err = f"team name `{team}` ambiguous: found {found}"
             logging.error(err)
             ER.report(err)
             n_errors += 1
@@ -102,9 +100,9 @@ def parse_sagarin(url):
     sags_ref = FS.collection("sagarin")
     doc_ref = sags_ref.document()
     doc_ref.set({
-        "timestamp": timestamp,
         "home_advantage": home_adv,
         })
+    doc_ref.set(meta)
     
     ratings_ref = doc_ref.collection("ratings")
     for rating in write_me:
@@ -132,7 +130,11 @@ def http(request):
         ratings = request_args['ratings']
     else:
         ratings = SAGARIN_URL
-    parse_sagarin(ratings)
+    meta = {
+        "event_id": "http",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc)
+    }
+    parse_sagarin(ratings, meta)
 
 
 def pubsub(event, context):
@@ -155,11 +157,19 @@ def pubsub(event, context):
         ratings = event['attributes']['ratings']
     else:
         ratings = SAGARIN_URL
-    parse_sagarin(ratings)
+    meta = {
+        "event_id": context.event_id,
+        "timestamp": parse(context.timestamp)
+    }
+    parse_sagarin(ratings, meta)
 
 
 def command_line(argv):
-    parse_sagarin(FLAGS.ratings)
+    meta = {
+        "event_id": "command-line",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc)
+    }
+    parse_sagarin(FLAGS.ratings, meta)
 
 
 if __name__ == '__main__':
