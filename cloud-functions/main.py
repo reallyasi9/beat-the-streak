@@ -4,6 +4,7 @@ from urllib.request import urlopen
 import re
 import ssl
 import datetime
+import sys
 
 FS = firestore.Client()
 ER = error_reporting.Client()
@@ -16,18 +17,10 @@ RE_HOME_ADV = re.compile(r"HOME ADVANTAGE=.*?\[<font color=\"#0000ff\">\s*([\-0-
 RE_RATINGS = re.compile(r"<font color=\"#000000\">\s+\d+\s+(.*?)\s+[A]+\s*=<.*?<font color=\"#9900ff\">\s*([\-0-9.]+)")
 
 
-TEAMS_REF = FS.collection("teams")
-# collate teams for in-memory searching
-TEAMS = {}
-for team in TEAMS_REF.stream():
-    TEAMS[team.id] = team.to_dict()
-
-
+TEAMS_GROUP = FS.collection_group("teams")
 def search_long(long):
-    docs = []
-    for team_id, team in TEAMS.items():
-        if "other_names" in team and long in team["other_names"]:
-            docs.append(team_id)
+    teams = TEAMS_GROUP.where("other_names", "array_contains", long)
+    docs = [team.reference for team in teams.stream()]
     return docs
 
 
@@ -82,7 +75,7 @@ def parse_sagarin(url):
             continue
         
         if len(found) > 1:
-            err = f"team name `{team}` ambiguous: found {docs}"
+            err = f"team name `{team}` ambiguous: found {found}"
             logging.error(err)
             ER.report(err)
             n_errors += 1
@@ -123,6 +116,8 @@ def http(request):
     request_json = request.get_json(silent=True)
     request_args = request.args
 
+    logging.info(f"triggered with http request, json {request_json}, args {request_args}")
+
     if request_json and 'ratings' in request_json:
         ratings = request_json['ratings']
     elif request_args and 'ratings' in request_args:
@@ -144,10 +139,13 @@ def pubsub(event, context):
     """
     import base64
 
+    logging.info(f"triggered with pubsub event {event}, context {context}")
+
     if 'data' in event:
         ratings = base64.b64decode(event['data']).decode('utf-8')
     else:
         ratings = SAGARIN_URL
+
     parse_sagarin(ratings)
 
 
@@ -156,4 +154,5 @@ def command_line(argv):
 
 
 if __name__ == '__main__':
+    logging.info(f"triggered with command line arguments {sys.argv}")
     app.run(command_line)
