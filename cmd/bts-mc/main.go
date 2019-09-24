@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"../bts"
+	"github.com/reallyasi9/beat-the-streak/internal/bts"
 )
 
 func check(err error) {

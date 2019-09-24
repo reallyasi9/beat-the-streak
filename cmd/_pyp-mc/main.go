@@ -8,8 +8,8 @@ import (
 
 	"runtime"
 
-	"../bts"
 	"github.com/atgjack/prob"
+	"github.com/reallyasi9/beat-the-streak/internal/bts"
 )
 
 var numCPU = runtime.GOMAXPROCS(0)
