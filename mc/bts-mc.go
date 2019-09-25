@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -35,6 +37,24 @@ var weekNumber = flag.Int("week", -1, "Week `number` (starting at 0)")
 var nTop = flag.Int("n", 5, "`number` of top probabilities to report for each player to check for better spreads")
 
 var startTime = time.Now()
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	var m PubSubMessage
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Errorf("ioutil.ReadAll: %v", err)
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	if err := json.Unmarshal(body, &m); err != nil {
+		log.Errorf("json.Unmarshal: %v", err)
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	// ratingsURL
+}
 
 func main() {
 	flag.Parse()

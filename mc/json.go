@@ -81,3 +81,16 @@ type PlayerResults struct {
 	// StreakOptions are the best options for each team the player could pick
 	StreakOptions []StreakOption
 }
+
+// PubSubMessage is the payload of a Pub/Sub event.
+type PubSubMessage struct {
+	Message struct {
+		Data []byte `json:"data,omitempty"`
+		ID   string `json:"id"`
+	} `json:"message"`
+	Subscription string `json:"subscription"`
+}
+
+// FirebaseEvent is the payload of a Firebase event.
+type FirebaseEvent struct {
+}
