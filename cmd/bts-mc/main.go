@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -48,9 +49,24 @@ type TeamSchedule struct {
 	Opponents         []*firestore.DocumentRef `firestore:"opponents"`
 }
 
+// PickerStreak is a picker's latest streak status, stored in the firestore database.
+type PickerStreak struct {
+	PickTypes      []int                    `firestore:"pick_types_remaining"`
+	Picker         *firestore.DocumentRef   `firestore:"picker"`
+	RemainingTeams []*firestore.DocumentRef `firestore:"remaining"`
+}
+
+// Picker is a picker.  Huh.
+type Picker struct {
+	Name string `firestore:"name_luke"`
+}
+
 func main() {
 	ctx := context.Background()
 	flag.Parse()
+
+	log.Printf("Beating the streak on project %s, week number %d", *projectID, *weekNumber)
+
 	conf := &firebase.Config{ProjectID: *projectID}
 	app, err := firebase.NewApp(ctx, conf)
 
@@ -188,60 +204,85 @@ func main() {
 	predictions := bts.MakePredictions(&schedule, *model)
 	log.Printf("Made predictions\n%s", predictions)
 
-	// // Figure out week types if necessary
-	// if *weekTypesFile == "" {
-	// 	log.Print("No week-type file given, assuming no byes/n-downs")
-	// }
+	// Get picker remaining teams
+	iter = fs.Collection("picks").Where("season", "==", seasonDoc.Ref).Where("week", "==", *weekNumber).Limit(1).Documents(ctx)
+	picksDoc, err := iter.Next()
+	check(err)
+	iter.Stop()
 
-	// players, err := bts.MakePlayers(*remainingFile, *weekTypesFile)
-	// check(err)
-	// log.Printf("Made players %v", players)
+	players := make(bts.PlayerMap)
+	iter = picksDoc.Ref.Collection("streaks").Documents(ctx)
+	for {
+		pickDoc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		check(err)
 
-	// log.Printf("The following users have not yet been eliminated: %v", players)
+		var ps PickerStreak
+		err = pickDoc.DataTo(&ps)
+		check(err)
 
-	// // Determine week number, if needed
-	// if *weekNumber < 0 {
-	// 	log.Print("Valid week number not given: attempting to determine week number from input data")
-	// 	*weekNumber = determineWeekNumber(players, schedule)
-	// }
-	// // err = validateWeekNumber(*weekNumber, players)
-	// // check(err)
-	// log.Printf("Week number %d", *weekNumber)
+		pickerDoc, err := ps.Picker.Get(ctx)
+		check(err)
 
-	// schedule.FilterWeeks(*weekNumber)
-	// log.Printf("Filtered schedule:\n%s", schedule)
+		var p Picker
+		err = pickerDoc.DataTo(&p)
+		check(err)
 
-	// predictions.FilterWeeks(*weekNumber)
-	// log.Printf("Filtered predictions:\n%s", predictions)
+		remainingTeamDocs, err := fs.GetAll(ctx, ps.RemainingTeams)
+		check(err)
 
-	// // Here we go.
-	// // Find the unique users.
-	// duplicates := players.Duplicates()
-	// log.Println("The following users are clones of one another:")
-	// for user, clones := range duplicates {
-	// 	log.Printf("%s clones %v", user, clones)
-	// 	for _, clone := range clones {
-	// 		delete(players, clone)
-	// 	}
-	// }
+		remainingTeams := make(bts.Remaining, len(remainingTeamDocs))
+		for i, teamDoc := range remainingTeamDocs {
+			var team bts.Team
+			err = teamDoc.DataTo(&team)
+			check(err)
 
-	// // Loop through the unique users
-	// playerItr := playerIterator(players)
+			remainingTeams[i] = team
+		}
 
-	// // Loop through streaks
-	// ppts := perPlayerTeamStreaks(playerItr, predictions)
+		players[p.Name], err = bts.NewPlayer(p.Name, remainingTeams, ps.PickTypes)
+		check(err)
+	}
+	iter.Stop()
 
-	// // Update best
-	// bestStreaks := calculateBestStreaks(ppts)
+	log.Printf("Pickers loaded:\n%v", players)
 
-	// // Collect by player
-	// streakOptions := collectByPlayer(bestStreaks, players, predictions, schedule)
+	schedule.FilterWeeks(*weekNumber)
+	log.Printf("Filtered schedule:\n%s", schedule)
 
-	// // Print results
-	// for _, streak := range streakOptions {
-	// 	j, _ := json.Marshal(streak)
-	// 	fmt.Println(string(j))
-	// }
+	predictions.FilterWeeks(*weekNumber)
+	log.Printf("Filtered predictions:\n%s", predictions)
+
+	// Here we go.
+	// Find the unique users.
+	duplicates := players.Duplicates()
+	log.Println("The following users are clones of one another:")
+	for user, clones := range duplicates {
+		log.Printf("%s clones %v", user, clones)
+		for _, clone := range clones {
+			delete(players, clone)
+		}
+	}
+
+	// Loop through the unique users
+	playerItr := playerIterator(players)
+
+	// Loop through streaks
+	ppts := perPlayerTeamStreaks(playerItr, predictions)
+
+	// Update best
+	bestStreaks := calculateBestStreaks(ppts)
+
+	// Collect by player
+	streakOptions := collectByPlayer(bestStreaks, players, predictions, &schedule)
+
+	// Print results
+	for _, streak := range streakOptions {
+		j, _ := json.Marshal(streak)
+		fmt.Println(string(j))
+	}
 
 }
 
