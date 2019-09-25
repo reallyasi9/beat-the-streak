@@ -62,7 +62,7 @@ func (s *Streak) String() string {
 	for week, tl := range s.weeks {
 		out.WriteString(fmt.Sprintf("%2d: ", week))
 		for _, t := range tl {
-			out.WriteString(fmt.Sprintf("%-4s ", t.Shortened()))
+			out.WriteString(fmt.Sprintf("%-4s ", t.Name()))
 		}
 		out.WriteString("\n")
 	}

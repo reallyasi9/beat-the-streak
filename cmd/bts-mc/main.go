@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -10,100 +10,238 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/firestore"
+	firebase "firebase.google.com/go"
 	"github.com/reallyasi9/beat-the-streak/internal/bts"
+	"google.golang.org/api/iterator"
 )
 
 func check(err error) {
 	if err != nil {
-		log.Fatal(err)
 		panic(err)
 	}
 }
 
-var ratingsURL = flag.String("ratings",
-	"http://sagarin.com/sports/cfsend.htm",
-	"`URL` of Sagarin ratings for calculating probabilities of win")
-var performanceURL = flag.String("performance",
-	"http://www.thepredictiontracker.com/ncaaresults.php",
-	"`URL` of model performances for calculating probabilities of win")
-var scheduleFile = flag.String("schedule",
-	"schedule.yaml",
-	"YAML `file` containing B1G schedule")
-var remainingFile = flag.String("remaining", "remaining.yaml", "YAML `file` containing picks remaining for each contestant")
-var weekTypesFile = flag.String("weektypes", "", "YAML `file` containing week types remaining for each contestant")
+var projectID = flag.String("project", "", "Google Cloud `project` to use")
 var weekNumber = flag.Int("week", -1, "Week `number` (starting at 0)")
 var nTop = flag.Int("n", 5, "`number` of top probabilities to report for each player to check for better spreads")
 
 var startTime = time.Now()
 
+// ModelPerformance holds Firestore data for model performance, parsed from ThePredictionTracker.com
+type ModelPerformance struct {
+	HomeBias          float64 `firestore:"bias"`
+	StandardDeviation float64 `firestore:"std_dev"`
+	System            string  `firestore:"system"`
+}
+
+// SagarinRating is a rating.  From Sagarin.  Stored in Firestore.  Simple.
+type SagarinRating struct {
+	Rating  float64                `firestore:"rating"`
+	TeamRef *firestore.DocumentRef `firestore:"team_id"`
+}
+
+// TeamSchedule is a team's schedule in Firestore format
+type TeamSchedule struct {
+	TeamRef           *firestore.DocumentRef   `firestore:"team"`
+	RelativeLocations []bts.RelativeLocation   `firestore:"locales"`
+	Opponents         []*firestore.DocumentRef `firestore:"opponents"`
+}
+
 func main() {
+	ctx := context.Background()
 	flag.Parse()
+	conf := &firebase.Config{ProjectID: *projectID}
+	app, err := firebase.NewApp(ctx, conf)
 
-	model, err := bts.MakeGaussianSpreadModel(*ratingsURL, *performanceURL, "Sagarin Points")
 	check(err)
-	log.Printf("Downloaded model %v", model)
 
-	schedule, err := bts.MakeSchedule(*scheduleFile)
+	fs, err := app.Firestore(ctx)
 	check(err)
-	log.Printf("Made schedule\n%v", schedule)
+	defer fs.Close()
 
-	predictions := bts.MakePredictions(schedule, *model)
-	log.Printf("Made predictions\n%s", predictions)
+	// Get most recent predictions
+	iter := fs.Collection("prediction_tracker").OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
+	predictionDoc, err := iter.Next()
+	check(err)
+	iter.Stop()
 
-	// Figure out week types if necessary
-	if *weekTypesFile == "" {
-		log.Print("No week-type file given, assuming no byes/n-downs")
+	// Get Sagarin Rating performance
+	iter = predictionDoc.Ref.Collection("modelperformance").Where("system", "==", "Sagarin Ratings").Limit(1).Documents(ctx)
+	sagDoc, err := iter.Next()
+	check(err)
+	iter.Stop()
+
+	var sagPerf ModelPerformance
+	sagDoc.DataTo(&sagPerf)
+	log.Printf("Sagarin Ratings performance: %v", sagPerf)
+
+	// Get most recent Sagarin Ratings proper
+	iter = fs.Collection("sagarin").OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
+	sagRateDoc, err := iter.Next()
+	check(err)
+	iter.Stop()
+
+	homeAdvantage, err := sagRateDoc.DataAt("home_advantage")
+	check(err)
+	log.Printf("Sagarin home advantage: %f", homeAdvantage)
+
+	// Get teams while we are at it--this is more efficient than making multiple calls
+	teamRefs := make([]*firestore.DocumentRef, 0)
+	ratings := make([]float64, 0)
+
+	iter = sagRateDoc.Ref.Collection("ratings").Documents(ctx)
+	for {
+		teamRatingDoc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		check(err)
+		var sr SagarinRating
+		teamRatingDoc.DataTo(&sr)
+
+		log.Printf("Sagarin rating: %v", sr)
+		teamRefs = append(teamRefs, sr.TeamRef)
+		ratings = append(ratings, sr.Rating)
+	}
+	iter.Stop()
+
+	teamDocs, err := fs.GetAll(ctx, teamRefs)
+	check(err)
+
+	teams := make([]bts.Team, len(teamDocs))
+	for i, td := range teamDocs {
+		var team bts.Team
+		err := td.DataTo(&team)
+		check(err)
+		log.Printf("team %v", team)
+		teams[i] = team
 	}
 
-	players, err := bts.MakePlayers(*remainingFile, *weekTypesFile)
-	check(err)
-	log.Printf("Made players %v", players)
-
-	log.Printf("The following users have not yet been eliminated: %v", players)
-
-	// Determine week number, if needed
-	if *weekNumber < 0 {
-		log.Print("Valid week number not given: attempting to determine week number from input data")
-		*weekNumber = determineWeekNumber(players, schedule)
+	// Build the probability model
+	ratingsMap := make(map[bts.Team]float64)
+	for i, t := range teams {
+		ratingsMap[t] = ratings[i]
 	}
-	// err = validateWeekNumber(*weekNumber, players)
-	// check(err)
-	log.Printf("Week number %d", *weekNumber)
+	homeBias := sagPerf.HomeBias + homeAdvantage.(float64)
+	closeBias := homeBias / 2.
+	model := bts.NewGaussianSpreadModel(ratingsMap, sagPerf.StandardDeviation, homeBias, closeBias)
 
-	schedule.FilterWeeks(*weekNumber)
-	log.Printf("Filtered schedule:\n%s", schedule)
+	log.Printf("Built model %v", model)
 
-	predictions.FilterWeeks(*weekNumber)
-	log.Printf("Filtered predictions:\n%s", predictions)
+	// Get most recent season
+	iter = fs.Collection("seasons").OrderBy("start", firestore.Desc).Limit(1).Documents(ctx)
+	seasonDoc, err := iter.Next()
+	check(err)
+	iter.Stop()
 
-	// Here we go.
-	// Find the unique users.
-	duplicates := players.Duplicates()
-	log.Println("The following users are clones of one another:")
-	for user, clones := range duplicates {
-		log.Printf("%s clones %v", user, clones)
-		for _, clone := range clones {
-			delete(players, clone)
+	// log.Printf("Most recent season %v", seasonDoc)
+
+	// Get schedule from most recent season
+	iter = fs.Collection("schedules").Where("season", "==", seasonDoc.Ref).Limit(1).Documents(ctx)
+	scheduleDoc, err := iter.Next()
+	check(err)
+	iter.Stop()
+
+	// log.Printf("Most recent schedule %v", scheduleDoc)
+
+	// Convert into schedule for predictions
+	schedule := make(bts.Schedule)
+	iter = scheduleDoc.Ref.Collection("teams").Documents(ctx)
+	for {
+		teamSchedule, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		check(err)
+
+		var ts TeamSchedule
+		err = teamSchedule.DataTo(&ts)
+		check(err)
+
+		opponentDocs, err := fs.GetAll(ctx, ts.Opponents)
+		check(err)
+
+		teamDoc, err := ts.TeamRef.Get(ctx)
+		check(err)
+
+		var team bts.Team
+		err = teamDoc.DataTo(&team)
+		check(err)
+
+		schedule[team] = make([]*bts.Game, len(opponentDocs))
+		for i, opponent := range opponentDocs {
+			var op bts.Team
+			err = opponent.DataTo(&op)
+			check(err)
+
+			game := bts.NewGame(team, op, ts.RelativeLocations[i])
+			log.Printf("game loaded %v", game)
+			schedule[team][i] = game
+
 		}
 	}
+	iter.Stop()
 
-	// Loop through the unique users
-	playerItr := playerIterator(players)
+	log.Printf("Schedule built:\n%v", schedule)
 
-	// Loop through streaks
-	ppts := perPlayerTeamStreaks(playerItr, predictions)
+	predictions := bts.MakePredictions(&schedule, *model)
+	log.Printf("Made predictions\n%s", predictions)
 
-	// Update best
-	bestStreaks := calculateBestStreaks(ppts)
+	// // Figure out week types if necessary
+	// if *weekTypesFile == "" {
+	// 	log.Print("No week-type file given, assuming no byes/n-downs")
+	// }
 
-	// Collect by player
-	streakOptions := collectByPlayer(bestStreaks, players, predictions, schedule)
+	// players, err := bts.MakePlayers(*remainingFile, *weekTypesFile)
+	// check(err)
+	// log.Printf("Made players %v", players)
 
-	// Print results
-	for _, streak := range streakOptions {
-		j, _ := json.Marshal(streak)
-		fmt.Println(string(j))
-	}
+	// log.Printf("The following users have not yet been eliminated: %v", players)
+
+	// // Determine week number, if needed
+	// if *weekNumber < 0 {
+	// 	log.Print("Valid week number not given: attempting to determine week number from input data")
+	// 	*weekNumber = determineWeekNumber(players, schedule)
+	// }
+	// // err = validateWeekNumber(*weekNumber, players)
+	// // check(err)
+	// log.Printf("Week number %d", *weekNumber)
+
+	// schedule.FilterWeeks(*weekNumber)
+	// log.Printf("Filtered schedule:\n%s", schedule)
+
+	// predictions.FilterWeeks(*weekNumber)
+	// log.Printf("Filtered predictions:\n%s", predictions)
+
+	// // Here we go.
+	// // Find the unique users.
+	// duplicates := players.Duplicates()
+	// log.Println("The following users are clones of one another:")
+	// for user, clones := range duplicates {
+	// 	log.Printf("%s clones %v", user, clones)
+	// 	for _, clone := range clones {
+	// 		delete(players, clone)
+	// 	}
+	// }
+
+	// // Loop through the unique users
+	// playerItr := playerIterator(players)
+
+	// // Loop through streaks
+	// ppts := perPlayerTeamStreaks(playerItr, predictions)
+
+	// // Update best
+	// bestStreaks := calculateBestStreaks(ppts)
+
+	// // Collect by player
+	// streakOptions := collectByPlayer(bestStreaks, players, predictions, schedule)
+
+	// // Print results
+	// for _, streak := range streakOptions {
+	// 	j, _ := json.Marshal(streak)
+	// 	fmt.Println(string(j))
+	// }
 
 }
 
