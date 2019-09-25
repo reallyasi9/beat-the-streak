@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	firebase "firebase.google.com/go"
 	"github.com/reallyasi9/beat-the-streak/internal/bts"
 	"google.golang.org/api/iterator"
 )
@@ -61,20 +59,86 @@ type Picker struct {
 	Name string `firestore:"name_luke"`
 }
 
+// Week is a week's worth of picks.
+type Week struct {
+	WeekNumber    int                      `firestore:"week"`
+	Pick          []*firestore.DocumentRef `firestore:"pick"`
+	Probabilities []float64                `firestore:"probabilities"`
+	Spreads       []float64                `firestore:"spreads"`
+}
+
+// StreakPrediction is a prediction for a complete streak.
+type StreakPrediction struct {
+	CumulativeProbability float64 `firestore:"cumulative_probability"`
+	CumulativeSpread      float64 `firestore:"cumulative_spread"`
+	Weeks                 []Week  `firestore:"weeks"`
+}
+
+// ByProbDesc sorts StreakPredictions by probability and spread (descending)
+type ByProbDesc []StreakPrediction
+
+func (a ByProbDesc) Len() int { return len(a) }
+func (a ByProbDesc) Less(i, j int) bool {
+	if a[i].CumulativeProbability == a[j].CumulativeProbability {
+		return a[i].CumulativeSpread > a[j].CumulativeSpread
+	}
+	return a[i].CumulativeProbability > a[j].CumulativeProbability
+}
+func (a ByProbDesc) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+
+// PickerPrediction contains the collected predictions for a given user.
+type PickerPrediction struct {
+	Picker            *firestore.DocumentRef `firestore:"picker"`
+	Season            *firestore.DocumentRef `firestore:"season"`
+	Week              int                    `firestore:"week"`
+	Schedule          *firestore.DocumentRef `firestore:"schedule"`
+	Sagarin           *firestore.DocumentRef `firestore:"sagarin"`
+	PredictionTracker *firestore.DocumentRef `firestore:"prediction_tracker"`
+
+	Remaining []*firestore.DocumentRef `firestore:"remaining"`
+	PickTypes []int                    `firestore:"pick_types_remaining"`
+
+	BestPick    []*firestore.DocumentRef `firestore:"best_pick"`
+	Probability float64                  `firestore:"probability"`
+	Spread      float64                  `firestore:"spread"`
+
+	PossiblePicks []StreakPrediction `firestore:"possible_picks"`
+
+	// CalculationStartTime is when the program that produced the results started
+	CalculationStartTime time.Time `firestore:"calculation_start_time"`
+	// CalculationEndTime is when the results were generated and finalized
+	CalculationEndTime time.Time `firestore:"calculation_end_time"`
+}
+
+var teamRefLookup = make(map[string]*firestore.DocumentRef)
+
+func makeTeamLookup(ctx context.Context, fs *firestore.Client) {
+	teamIter := fs.Collection("teams").Documents(ctx)
+	for {
+		teamDoc, err := teamIter.Next()
+		if err == iterator.Done {
+			break
+		}
+		check(err)
+
+		team4, err := teamDoc.DataAt("name_4")
+		check(err)
+
+		teamRefLookup[team4.(string)] = teamDoc.Ref
+	}
+}
+
 func main() {
 	ctx := context.Background()
 	flag.Parse()
 
 	log.Printf("Beating the streak on project %s, week number %d", *projectID, *weekNumber)
 
-	conf := &firebase.Config{ProjectID: *projectID}
-	app, err := firebase.NewApp(ctx, conf)
-
-	check(err)
-
-	fs, err := app.Firestore(ctx)
+	fs, err := firestore.NewClient(ctx, *projectID)
 	check(err)
 	defer fs.Close()
+
+	makeTeamLookup(ctx, fs)
 
 	// Get most recent predictions
 	iter := fs.Collection("prediction_tracker").OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
@@ -211,6 +275,8 @@ func main() {
 	iter.Stop()
 
 	players := make(bts.PlayerMap)
+	// for fast lookups later
+	pickerLookup := make(map[string]PickerStreak)
 	iter = picksDoc.Ref.Collection("streaks").Documents(ctx)
 	for {
 		pickDoc, err := iter.Next()
@@ -243,6 +309,7 @@ func main() {
 		}
 
 		players[p.Name], err = bts.NewPlayer(p.Name, remainingTeams, ps.PickTypes)
+		pickerLookup[p.Name] = ps
 		check(err)
 	}
 	iter.Stop()
@@ -266,6 +333,8 @@ func main() {
 		}
 	}
 
+	log.Println("Starting MC")
+
 	// Loop through the unique users
 	playerItr := playerIterator(players)
 
@@ -279,9 +348,21 @@ func main() {
 	streakOptions := collectByPlayer(bestStreaks, players, predictions, &schedule)
 
 	// Print results
-	for _, streak := range streakOptions {
-		j, _ := json.Marshal(streak)
-		fmt.Println(string(j))
+	output := fs.Collection("streak_predictions")
+	for picker, streak := range streakOptions {
+		streak.Picker = pickerLookup[picker].Picker
+		streak.Remaining = pickerLookup[picker].RemainingTeams
+		streak.PickTypes = pickerLookup[picker].PickTypes
+		streak.Schedule = scheduleDoc.Ref
+		streak.Sagarin = sagRateDoc.Ref
+		streak.Season = seasonDoc.Ref
+		streak.PredictionTracker = predictionDoc.Ref
+
+		log.Printf("Writing:\n%v", streak)
+
+		_, wr, err := output.Add(ctx, streak)
+		check(err)
+		log.Printf("Wrote streak %v", wr)
 	}
 
 }
@@ -401,16 +482,14 @@ func calculateBestStreaks(ppts <-chan playerTeamStreakProb) <-chan streakMap {
 	return out
 }
 
-func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *bts.Predictions, schedule *bts.Schedule) []PlayerResults {
+func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *bts.Predictions, schedule *bts.Schedule) map[string]PickerPrediction {
 
 	// Collect streak options by player
-	soByPlayer := make(map[string][]StreakOption)
+	soByPlayer := make(map[string][]StreakPrediction)
 	for sm := range sms {
 
 		for pt, sp := range sm {
 
-			firstTeam := pt.team
-			cProb, cSpread := bts.AccumulateStreak(predictions, sp.streak)
 			prob := sp.prob
 			spread := sp.spread
 
@@ -418,30 +497,29 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 			for iweek := 0; iweek < sp.streak.NumWeeks(); iweek++ {
 
 				seasonWeek := iweek + *weekNumber
-				weekProbability := 1.
-				weekSpread := 0.
-
-				picks := make([]Pick, 0)
+				pickedTeams := make([]*firestore.DocumentRef, 0)
+				pickedProbs := make([]float64, 0)
+				pickedSpreads := make([]float64, 0)
 				for _, team := range sp.streak.GetWeek(iweek) {
 					probability := predictions.GetProbability(team, iweek)
+					pickedProbs = append(pickedProbs, probability)
+
 					spread := predictions.GetSpread(team, iweek)
-					opponent := schedule.Get(team, iweek).Team(1)
+					pickedSpreads = append(pickedSpreads, spread)
 
-					picks = append(picks, Pick{Selected: team, Opponent: opponent, Probability: probability, Spread: spread})
-
-					weekProbability *= probability
-					weekSpread += spread
+					// opponent := schedule.Get(team, iweek).Team(1)
+					pickedTeams = append(pickedTeams, teamRefLookup[team.Name()])
 				}
 
-				weeks[iweek] = Week{Picks: picks, SeasonWeek: seasonWeek, Probability: weekProbability, Spread: weekSpread}
+				weeks[iweek] = Week{WeekNumber: seasonWeek, Pick: pickedTeams, Probabilities: pickedProbs, Spreads: pickedSpreads}
 
 			}
 
-			so := StreakOption{FirstSelected: firstTeam, Weeks: weeks, CumulativeProbability: cProb, CumulativeSpread: cSpread, Probability: prob, Spread: spread}
+			so := StreakPrediction{CumulativeProbability: prob, CumulativeSpread: spread, Weeks: weeks}
 			if sos, ok := soByPlayer[pt.player]; ok {
 				soByPlayer[pt.player] = append(sos, so)
 			} else {
-				soByPlayer[pt.player] = []StreakOption{so}
+				soByPlayer[pt.player] = []StreakPrediction{so}
 			}
 
 		}
@@ -449,8 +527,9 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 	}
 
 	// Run through players and calculate best option
-	prs := make([]PlayerResults, 0)
-	for player, streakOptions := range soByPlayer {
+	prs := make(map[string]PickerPrediction)
+	for picker, streakOptions := range soByPlayer {
+		// TODO: look up player (key of soByPlayer)
 
 		if len(streakOptions) == 0 {
 			continue
@@ -458,25 +537,28 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 
 		sort.Sort(ByProbDesc(streakOptions))
 
-		bestSelection := make([]bts.Team, 0)
-		for _, pick := range streakOptions[0].Weeks[0].Picks {
-			bestSelection = append(bestSelection, pick.Selected)
-		}
-		bestProb := streakOptions[0].Probability
-		bestSpread := streakOptions[0].Spread
+		bestSelection := streakOptions[0].Weeks[0].Pick
+		bestProb := streakOptions[0].CumulativeProbability
+		bestSpread := streakOptions[0].CumulativeSpread
 
-		prs = append(prs, PlayerResults{
-			Player:               player,
-			StartingWeek:         *weekNumber,
+		prs[picker] = PickerPrediction{
+			// Picker            *firestore.DocumentRef `firestore:"picker"`
+			// Season            *firestore.DocumentRef `firestore:"season"`
+			Week: *weekNumber,
+			// Schedule          *firestore.DocumentRef `firestore:"schedule"`
+			// Sagarin           *firestore.DocumentRef `firestore:"sagarin"`
+			// PredictionTracker *firestore.DocumentRef `firestore:"prediction_tracker"`
+
+			// Remaining []*firestore.DocumentRef `firestore:"remaining"`
+			// PickTypes []int                    `firestore:"pick_types_remaining"`
+
+			BestPick:             bestSelection,
+			Probability:          bestProb,
+			Spread:               bestSpread,
+			PossiblePicks:        streakOptions,
 			CalculationStartTime: startTime,
 			CalculationEndTime:   time.Now(),
-			RemainingTeams:       players[player].RemainingTeams(),
-			RemainingWeekTypes:   players[player].RemainingWeekTypes(),
-			BestSelection:        bestSelection,
-			BestProbability:      bestProb,
-			BestSpread:           bestSpread,
-			StreakOptions:        streakOptions,
-		})
+		}
 	}
 
 	return prs
