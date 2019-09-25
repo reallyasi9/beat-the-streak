@@ -32,6 +32,9 @@ def split_locale_team(team):
     return team, 2
 
 
+BYE_WEEK = next(FS.collection("teams").where("name_4", "==", "BYE").limit(1).stream()).reference
+
+
 FLAGS = flags.FLAGS
 flags.DEFINE_string("schedule", None, "Schedule YAML file to parse.")
 flags.mark_flag_as_required("schedule")
@@ -39,9 +42,9 @@ flags.mark_flag_as_required("schedule")
 
 def schedule(schedule_file):
     with open(schedule_file, "r") as f:
-        schedule = yaml.load(f)
+        schedule_yaml = yaml.load(f)
     
-    logging.info(f"parsing schedule {schedule}")
+    logging.info(f"parsing schedule {schedule_yaml}")
 
     season_doc = next(FS.collection("seasons").order_by("start", direction="DESCENDING").limit(1).stream())
     season_ref = season_doc.reference
@@ -53,7 +56,7 @@ def schedule(schedule_file):
     team_schedules_ref = schedule_ref.collection("teams")
 
     team_errors = 0
-    for team, others in schedule.items():
+    for team, others in schedule_yaml.items():
         team1 = lookup_team(team)
         if not team1:
             team_errors += 1
@@ -64,7 +67,7 @@ def schedule(schedule_file):
         for lteam in others:
 
             if not lteam:
-                opponents.append(None)
+                opponents.append(BYE_WEEK)
                 locales.append(0)
                 continue
 

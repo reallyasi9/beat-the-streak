@@ -94,6 +94,7 @@ def parse_sagarin(url):
     doc_ref = sags_ref.document()
     doc_ref.set({
         "timestamp": timestamp,
+        "home_advantage": home_adv
         })
     
     ratings_ref = doc_ref.collection("ratings")
