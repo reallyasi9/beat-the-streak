@@ -14,7 +14,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -v -o bts-mc cmd/bts-mc/*.go
 FROM alpine
 RUN apk add --no-cache ca-certificates
 
-COPY --from=builder /go/src/github.com/reallyasi9/beat-the-streak /bts-mc
+COPY --from=builder /go/src/github.com/reallyasi9/beat-the-streak/bts-mc /bts-mc
 
 CMD ["/bts-mc"]
 # , "-project", ${project_id}
