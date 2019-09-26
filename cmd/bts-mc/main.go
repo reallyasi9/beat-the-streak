@@ -2,15 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
+	"net/http"
+	"os"
 	"sort"
 	"sync"
 	"time"
 
 	"cloud.google.com/go/firestore"
+	firebase "firebase.google.com/go"
 	"github.com/reallyasi9/beat-the-streak/internal/bts"
 	"google.golang.org/api/iterator"
 )
@@ -21,10 +26,7 @@ func check(err error) {
 	}
 }
 
-var projectID = flag.String("project", "", "Google Cloud `project` to use")
-var weekNumber = flag.Int("week", -1, "Week `number` (starting at 0)")
-var nTop = flag.Int("n", 5, "`number` of top probabilities to report for each player to check for better spreads")
-
+var weekNumber = 0
 var startTime = time.Now()
 
 // ModelPerformance holds Firestore data for model performance, parsed from ThePredictionTracker.com
@@ -129,12 +131,43 @@ func makeTeamLookup(ctx context.Context, fs *firestore.Client) {
 }
 
 func main() {
-	ctx := context.Background()
+	log.Print("Beating the streak")
 	flag.Parse()
 
-	log.Printf("Beating the streak on project %s, week number %d", *projectID, *weekNumber)
+	http.HandleFunc("/", handler)
 
-	fs, err := firestore.NewClient(ctx, *projectID)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", port), nil))
+}
+
+type requestMessage struct {
+	Week int `json:"week"`
+}
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+	body, err := ioutil.ReadAll(r.Body)
+	check(err)
+
+	var rm requestMessage
+	err = json.Unmarshal(body, &rm)
+	if err != nil {
+		http.Error(w, "ERROR: Unable to properly parse request object", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("Beating the streak, week number %d", rm.Week)
+	weekNumber = rm.Week
+
+	conf := &firebase.Config{}
+	app, err := firebase.NewApp(ctx, conf)
+	check(err)
+
+	fs, err := app.Firestore(ctx)
 	check(err)
 	defer fs.Close()
 
@@ -269,7 +302,7 @@ func main() {
 	log.Printf("Made predictions\n%s", predictions)
 
 	// Get picker remaining teams
-	iter = fs.Collection("picks").Where("season", "==", seasonDoc.Ref).Where("week", "==", *weekNumber).Limit(1).Documents(ctx)
+	iter = fs.Collection("picks").Where("season", "==", seasonDoc.Ref).Where("week", "==", weekNumber).Limit(1).Documents(ctx)
 	picksDoc, err := iter.Next()
 	check(err)
 	iter.Stop()
@@ -316,10 +349,10 @@ func main() {
 
 	log.Printf("Pickers loaded:\n%v", players)
 
-	schedule.FilterWeeks(*weekNumber)
+	schedule.FilterWeeks(weekNumber)
 	log.Printf("Filtered schedule:\n%s", schedule)
 
-	predictions.FilterWeeks(*weekNumber)
+	predictions.FilterWeeks(weekNumber)
 	log.Printf("Filtered predictions:\n%s", predictions)
 
 	// Here we go.
@@ -496,7 +529,7 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 			weeks := make([]Week, sp.streak.NumWeeks())
 			for iweek := 0; iweek < sp.streak.NumWeeks(); iweek++ {
 
-				seasonWeek := iweek + *weekNumber
+				seasonWeek := iweek + weekNumber
 				pickedTeams := make([]*firestore.DocumentRef, 0)
 				pickedProbs := make([]float64, 0)
 				pickedSpreads := make([]float64, 0)
@@ -544,7 +577,7 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 		prs[picker] = PickerPrediction{
 			// Picker            *firestore.DocumentRef `firestore:"picker"`
 			// Season            *firestore.DocumentRef `firestore:"season"`
-			Week: *weekNumber,
+			Week: weekNumber,
 			// Schedule          *firestore.DocumentRef `firestore:"schedule"`
 			// Sagarin           *firestore.DocumentRef `firestore:"sagarin"`
 			// PredictionTracker *firestore.DocumentRef `firestore:"prediction_tracker"`
