@@ -115,14 +115,14 @@ func (p Predictions) String() string {
 	keys := make([]string, len(p.probs))
 	i := 0
 	for k := range p.probs {
-		keys[i] = string(k)
+		keys[i] = k.Name()
 		i++
 	}
 	sort.Strings(keys)
 
 	nWeeks := 0
 	if len(keys) > 0 {
-		nWeeks = len(p.probs[Team(keys[0])])
+		nWeeks = len(p.probs[Team{Name4: keys[0]}])
 	}
 
 	var buffer strings.Builder
@@ -133,10 +133,10 @@ func (p Predictions) String() string {
 	}
 	buffer.WriteString("\n")
 	for _, k := range keys {
-		key := Team(k)
-		buffer.WriteString(fmt.Sprintf("%-4s ", key.Shortened()))
-		for w, v := range p.probs[Team(k)] {
-			buffer.WriteString(fmt.Sprintf(" %5.3f(%+5.3f) ", v, p.spreads[Team(k)][w]))
+		key := Team{Name4: k}
+		buffer.WriteString(fmt.Sprintf("%-4s ", key.Name()))
+		for w, v := range p.probs[Team{Name4: k}] {
+			buffer.WriteString(fmt.Sprintf(" %5.3f(%+6.2f) ", v, p.spreads[Team{Name4: k}][w]))
 		}
 		buffer.WriteString("\n")
 	}

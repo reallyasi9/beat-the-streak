@@ -103,7 +103,7 @@ func MakeGaussianSpreadModel(ratingsURL, performanceURL, modelName string) (*Gau
 		if err != nil {
 			return nil, err
 		}
-		ratings[Team(matches[1])] = rval
+		ratings[Team{Name4: matches[1]}] = rval
 	}
 
 	bias, std, err := scrapeParameters(performanceURL, modelName)

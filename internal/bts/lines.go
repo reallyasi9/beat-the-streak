@@ -43,7 +43,7 @@ func MakeLines(url string) (LineMap, error) {
 			return nil, err
 		}
 
-		game := NewGame(Team(record[0]), Team(record[1]), Neutral)
+		game := NewGame(Team{Name4: record[0]}, Team{Name4: record[1]}, Neutral)
 
 		for i, line := range record[2:len(record)] {
 			model := models[i]

@@ -1,7 +1,0 @@
-steps:
-- name: 'gcr.io/cloud-builders/gcloud'
-  args: ['functions', 'deploy', '${_GCF_NAME}', '--runtime', 'python37', '--trigger-topic', '${_PUBSUB_TOPIC}', '--entry-point', 'pubsub']
-  dir: 'cloud-functions'
-- name: 'gcr.io/cloud-builders/gcloud'
-  args: ['functions', 'deploy', '${_GCF_NAME}_http', '--runtime', 'python37', '--trigger-http', '--entry-point', 'http']
-  dir: 'cloud-functions'
