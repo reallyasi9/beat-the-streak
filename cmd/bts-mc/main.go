@@ -37,7 +37,8 @@ type ModelPerformance struct {
 
 // SagarinScrapeResult stores the home advantages from a scraping of Sagarin.
 type SagarinScrapeResult struct {
-	HomeAdvantage float64 `firestore:"home_advantage_rating"`
+	HomeAdvantage float64   `firestore:"home_advantage_rating"`
+	Timestamp     time.Time `firestore:"timestamp"`
 }
 
 // SagarinRating is a rating.  From Sagarin.  Stored in Firestore.  Simple.
@@ -163,7 +164,7 @@ func main() {
 
 type requestMessage struct {
 	Picker string `json:"picker"`
-	Week   int    `json:"week"`
+	Week   *int   `json:"week"` // pointer, as this is optional, but could be zero
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +180,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Beating the streak, week number %d, picker %s", rm.Week, rm.Picker)
+	log.Printf("Beating the streak, picker %s", rm.Picker)
 	weekNumber := rm.Week
 	pickerName := rm.Picker
 
@@ -197,6 +198,41 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	makeTeamLookup(ctx, fs)
 
+	// Get most recent season
+	iter := fs.Collection("seasons").OrderBy("start", firestore.Desc).Limit(1).Documents(ctx)
+	seasonDoc, err := iter.Next()
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
+	iter.Stop()
+
+	// Get most recent Sagarin Ratings proper
+	iter = fs.Collection("sagarin").OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
+	sagRateDoc, err := iter.Next()
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
+	iter.Stop()
+
+	// With these in hand, calculate the week number if necessary
+	if weekNumber == nil {
+		seasonStart, err := seasonDoc.DataAt("season")
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
+
+		sagtime, err := sagRateDoc.DataAt("timestamp")
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
+
+		week := sagtime.(time.Time).Sub(seasonStart.(time.Time))
+		*weekNumber = int(week.Hours() / (24 * 7))
+		log.Printf("Determined week number %d from Sagarin and season start", *weekNumber)
+	} else {
+		log.Printf("Week number given as %d", *weekNumber)
+	}
+
 	// Get this user
 	pickerRef, err := pickerRefLookup(ctx, fs, pickerName)
 	if check(w, err, http.StatusInternalServerError) {
@@ -204,7 +240,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get most recent predictions
-	iter := fs.Collection("prediction_tracker").OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
+	iter = fs.Collection("prediction_tracker").OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
 	predictionDoc, err := iter.Next()
 	if check(w, err, http.StatusInternalServerError) {
 		return
@@ -225,14 +261,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("Sagarin Ratings performance: %v", sagPerf)
-
-	// Get most recent Sagarin Ratings proper
-	iter = fs.Collection("sagarin").OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
-	sagRateDoc, err := iter.Next()
-	if check(w, err, http.StatusInternalServerError) {
-		return
-	}
-	iter.Stop()
 
 	homeAdvantage, err := sagRateDoc.DataAt("home_advantage_rating")
 	if check(w, err, http.StatusInternalServerError) {
@@ -293,14 +321,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	model := bts.NewGaussianSpreadModel(ratingsMap, sagPerf.StandardDeviation, homeBias, closeBias)
 
 	log.Printf("Built model %v", model)
-
-	// Get most recent season
-	iter = fs.Collection("seasons").OrderBy("start", firestore.Desc).Limit(1).Documents(ctx)
-	seasonDoc, err := iter.Next()
-	if check(w, err, http.StatusInternalServerError) {
-		return
-	}
-	iter.Stop()
 
 	// log.Printf("Most recent season %v", seasonDoc)
 
@@ -426,10 +446,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Pickers loaded:\n%v", players)
 
-	schedule.FilterWeeks(weekNumber)
+	schedule.FilterWeeks(*weekNumber)
 	log.Printf("Filtered schedule:\n%s", schedule)
 
-	predictions.FilterWeeks(weekNumber)
+	predictions.FilterWeeks(*weekNumber)
 	log.Printf("Filtered predictions:\n%s", predictions)
 
 	// Here we go.
@@ -456,7 +476,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	bestStreaks := calculateBestStreaks(ppts)
 
 	// Collect by player
-	streakOptions := collectByPlayer(bestStreaks, players, predictions, &schedule, weekNumber)
+	streakOptions := collectByPlayer(bestStreaks, players, predictions, &schedule, *weekNumber)
 
 	// Print results
 	output := fs.Collection("streak_predictions")
