@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -20,31 +19,36 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-func check(err error) {
+func check(w http.ResponseWriter, err error, code int) bool {
 	if err != nil {
-		panic(err)
+		log.Fatalln(err)
+		http.Error(w, fmt.Sprintf("ERROR %d: %s", code, http.StatusText(code)), code)
+		return true
 	}
+	return false
 }
-
-var weekNumber = 0
-var startTime = time.Now()
 
 // ModelPerformance holds Firestore data for model performance, parsed from ThePredictionTracker.com
 type ModelPerformance struct {
-	HomeBias          float64 `firestore:"bias"`
-	StandardDeviation float64 `firestore:"std_dev"`
-	System            string  `firestore:"system"`
+	HomeBias          float64                `firestore:"bias"`
+	StandardDeviation float64                `firestore:"std_dev"`
+	Model             *firestore.DocumentRef `firestore:"model"`
+}
+
+// SagarinScrapeResult stores the home advantages from a scraping of Sagarin.
+type SagarinScrapeResult struct {
+	HomeAdvantage float64 `firestore:"home_advantage_rating"`
 }
 
 // SagarinRating is a rating.  From Sagarin.  Stored in Firestore.  Simple.
 type SagarinRating struct {
-	Rating  float64                `firestore:"rating"`
-	TeamRef *firestore.DocumentRef `firestore:"team_id"`
+	Rating float64                `firestore:"rating"`
+	Team   *firestore.DocumentRef `firestore:"team"`
 }
 
 // TeamSchedule is a team's schedule in Firestore format
 type TeamSchedule struct {
-	TeamRef           *firestore.DocumentRef   `firestore:"team"`
+	Team              *firestore.DocumentRef   `firestore:"team"`
 	RelativeLocations []bts.RelativeLocation   `firestore:"locales"`
 	Opponents         []*firestore.DocumentRef `firestore:"opponents"`
 }
@@ -114,25 +118,38 @@ type PickerPrediction struct {
 
 var teamRefLookup = make(map[string]*firestore.DocumentRef)
 
-func makeTeamLookup(ctx context.Context, fs *firestore.Client) {
+func makeTeamLookup(ctx context.Context, fs *firestore.Client) error {
 	teamIter := fs.Collection("teams").Documents(ctx)
+	defer teamIter.Stop()
 	for {
 		teamDoc, err := teamIter.Next()
 		if err == iterator.Done {
 			break
 		}
-		check(err)
+		if err != nil {
+			return err
+		}
 
 		team4, err := teamDoc.DataAt("name_4")
-		check(err)
+		if err != nil {
+			return err
+		}
 
 		teamRefLookup[team4.(string)] = teamDoc.Ref
 	}
+	return nil
+}
+
+func pickerRefLookup(ctx context.Context, fs *firestore.Client, name string) (*firestore.DocumentRef, error) {
+	pickerRef, err := fs.Collection("pickers").Where("name_luke", "==", name).Limit(1).Documents(ctx).Next()
+	if err != nil {
+		return nil, err
+	}
+	return pickerRef.Ref, nil
 }
 
 func main() {
 	log.Print("Beating the streak")
-	flag.Parse()
 
 	http.HandleFunc("/", handler)
 
@@ -145,58 +162,82 @@ func main() {
 }
 
 type requestMessage struct {
-	Week int `json:"week"`
+	Picker string `json:"picker"`
+	Week   int    `json:"week"`
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	body, err := ioutil.ReadAll(r.Body)
-	check(err)
-
-	var rm requestMessage
-	err = json.Unmarshal(body, &rm)
-	if err != nil {
-		http.Error(w, "ERROR: Unable to properly parse request object", http.StatusBadRequest)
+	if check(w, err, http.StatusBadRequest) {
 		return
 	}
 
-	log.Printf("Beating the streak, week number %d", rm.Week)
-	weekNumber = rm.Week
+	var rm requestMessage
+	err = json.Unmarshal(body, &rm)
+	if check(w, err, http.StatusBadRequest) {
+		return
+	}
+
+	log.Printf("Beating the streak, week number %d, picker %s", rm.Week, rm.Picker)
+	weekNumber := rm.Week
+	pickerName := rm.Picker
 
 	conf := &firebase.Config{}
 	app, err := firebase.NewApp(ctx, conf)
-	check(err)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
 
 	fs, err := app.Firestore(ctx)
-	check(err)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
 	defer fs.Close()
 
 	makeTeamLookup(ctx, fs)
 
+	// Get this user
+	pickerRef, err := pickerRefLookup(ctx, fs, pickerName)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
+
 	// Get most recent predictions
 	iter := fs.Collection("prediction_tracker").OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
 	predictionDoc, err := iter.Next()
-	check(err)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
 	iter.Stop()
 
 	// Get Sagarin Rating performance
-	iter = predictionDoc.Ref.Collection("modelperformance").Where("system", "==", "Sagarin Ratings").Limit(1).Documents(ctx)
+	iter = predictionDoc.Ref.Collection("model_performance").Where("system", "==", "Sagarin Ratings").Limit(1).Documents(ctx)
 	sagDoc, err := iter.Next()
-	check(err)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
 	iter.Stop()
 
 	var sagPerf ModelPerformance
-	sagDoc.DataTo(&sagPerf)
+	err = sagDoc.DataTo(&sagPerf)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
 	log.Printf("Sagarin Ratings performance: %v", sagPerf)
 
 	// Get most recent Sagarin Ratings proper
 	iter = fs.Collection("sagarin").OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
 	sagRateDoc, err := iter.Next()
-	check(err)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
 	iter.Stop()
 
-	homeAdvantage, err := sagRateDoc.DataAt("home_advantage")
-	check(err)
+	homeAdvantage, err := sagRateDoc.DataAt("home_advantage_rating")
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
 	log.Printf("Sagarin home advantage: %f", homeAdvantage)
 
 	// Get teams while we are at it--this is more efficient than making multiple calls
@@ -209,24 +250,35 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		if err == iterator.Done {
 			break
 		}
-		check(err)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
+
 		var sr SagarinRating
-		teamRatingDoc.DataTo(&sr)
+		err = teamRatingDoc.DataTo(&sr)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
 
 		log.Printf("Sagarin rating: %v", sr)
-		teamRefs = append(teamRefs, sr.TeamRef)
+		teamRefs = append(teamRefs, sr.Team)
 		ratings = append(ratings, sr.Rating)
 	}
 	iter.Stop()
 
 	teamDocs, err := fs.GetAll(ctx, teamRefs)
-	check(err)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
 
 	teams := make([]bts.Team, len(teamDocs))
 	for i, td := range teamDocs {
 		var team bts.Team
 		err := td.DataTo(&team)
-		check(err)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
+
 		log.Printf("team %v", team)
 		teams[i] = team
 	}
@@ -245,7 +297,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// Get most recent season
 	iter = fs.Collection("seasons").OrderBy("start", firestore.Desc).Limit(1).Documents(ctx)
 	seasonDoc, err := iter.Next()
-	check(err)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
 	iter.Stop()
 
 	// log.Printf("Most recent season %v", seasonDoc)
@@ -253,7 +307,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// Get schedule from most recent season
 	iter = fs.Collection("schedules").Where("season", "==", seasonDoc.Ref).Limit(1).Documents(ctx)
 	scheduleDoc, err := iter.Next()
-	check(err)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
 	iter.Stop()
 
 	// log.Printf("Most recent schedule %v", scheduleDoc)
@@ -266,27 +322,39 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		if err == iterator.Done {
 			break
 		}
-		check(err)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
 
 		var ts TeamSchedule
 		err = teamSchedule.DataTo(&ts)
-		check(err)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
 
 		opponentDocs, err := fs.GetAll(ctx, ts.Opponents)
-		check(err)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
 
-		teamDoc, err := ts.TeamRef.Get(ctx)
-		check(err)
+		teamDoc, err := ts.Team.Get(ctx)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
 
 		var team bts.Team
 		err = teamDoc.DataTo(&team)
-		check(err)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
 
 		schedule[team] = make([]*bts.Game, len(opponentDocs))
 		for i, opponent := range opponentDocs {
 			var op bts.Team
 			err = opponent.DataTo(&op)
-			check(err)
+			if check(w, err, http.StatusInternalServerError) {
+				return
+			}
 
 			game := bts.NewGame(team, op, ts.RelativeLocations[i])
 			log.Printf("game loaded %v", game)
@@ -304,48 +372,57 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// Get picker remaining teams
 	iter = fs.Collection("picks").Where("season", "==", seasonDoc.Ref).Where("week", "==", weekNumber).Limit(1).Documents(ctx)
 	picksDoc, err := iter.Next()
-	check(err)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
 	iter.Stop()
 
 	players := make(bts.PlayerMap)
 	// for fast lookups later
-	pickerLookup := make(map[string]PickerStreak)
-	iter = picksDoc.Ref.Collection("streaks").Documents(ctx)
-	for {
-		pickDoc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		check(err)
-
-		var ps PickerStreak
-		err = pickDoc.DataTo(&ps)
-		check(err)
-
-		pickerDoc, err := ps.Picker.Get(ctx)
-		check(err)
-
-		var p Picker
-		err = pickerDoc.DataTo(&p)
-		check(err)
-
-		remainingTeamDocs, err := fs.GetAll(ctx, ps.RemainingTeams)
-		check(err)
-
-		remainingTeams := make(bts.Remaining, len(remainingTeamDocs))
-		for i, teamDoc := range remainingTeamDocs {
-			var team bts.Team
-			err = teamDoc.DataTo(&team)
-			check(err)
-
-			remainingTeams[i] = team
-		}
-
-		players[p.Name], err = bts.NewPlayer(p.Name, remainingTeams, ps.PickTypes)
-		pickerLookup[p.Name] = ps
-		check(err)
+	iter = picksDoc.Ref.Collection("streaks").Where("picker", "==", pickerRef).Limit(1).Documents(ctx)
+	pickDoc, err := iter.Next()
+	if check(w, err, http.StatusInternalServerError) {
+		return
 	}
 	iter.Stop()
+
+	var ps PickerStreak
+	err = pickDoc.DataTo(&ps)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
+
+	pickerDoc, err := ps.Picker.Get(ctx)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
+
+	var p Picker
+	err = pickerDoc.DataTo(&p)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
+
+	remainingTeamDocs, err := fs.GetAll(ctx, ps.RemainingTeams)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
+
+	remainingTeams := make(bts.Remaining, len(remainingTeamDocs))
+	for i, teamDoc := range remainingTeamDocs {
+		var team bts.Team
+		err = teamDoc.DataTo(&team)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
+
+		remainingTeams[i] = team
+	}
+
+	players[p.Name], err = bts.NewPlayer(p.Name, remainingTeams, ps.PickTypes)
+	if check(w, err, http.StatusInternalServerError) {
+		return
+	}
 
 	log.Printf("Pickers loaded:\n%v", players)
 
@@ -357,6 +434,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	// Here we go.
 	// Find the unique users.
+	// Legacy code!
 	duplicates := players.Duplicates()
 	log.Println("The following users are clones of one another:")
 	for user, clones := range duplicates {
@@ -378,14 +456,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	bestStreaks := calculateBestStreaks(ppts)
 
 	// Collect by player
-	streakOptions := collectByPlayer(bestStreaks, players, predictions, &schedule)
+	streakOptions := collectByPlayer(bestStreaks, players, predictions, &schedule, weekNumber)
 
 	// Print results
 	output := fs.Collection("streak_predictions")
-	for picker, streak := range streakOptions {
-		streak.Picker = pickerLookup[picker].Picker
-		streak.Remaining = pickerLookup[picker].RemainingTeams
-		streak.PickTypes = pickerLookup[picker].PickTypes
+	// Note: only one picker for now!
+	for _, streak := range streakOptions {
+		streak.Picker = ps.Picker
+		streak.Remaining = ps.RemainingTeams
+		streak.PickTypes = ps.PickTypes
 		streak.Schedule = scheduleDoc.Ref
 		streak.Sagarin = sagRateDoc.Ref
 		streak.Season = seasonDoc.Ref
@@ -394,7 +473,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Writing:\n%v", streak)
 
 		_, wr, err := output.Add(ctx, streak)
-		check(err)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
 		log.Printf("Wrote streak %v", wr)
 	}
 
@@ -515,7 +596,9 @@ func calculateBestStreaks(ppts <-chan playerTeamStreakProb) <-chan streakMap {
 	return out
 }
 
-func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *bts.Predictions, schedule *bts.Schedule) map[string]PickerPrediction {
+func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *bts.Predictions, schedule *bts.Schedule, weekNumber int) map[string]PickerPrediction {
+
+	startTime := time.Now()
 
 	// Collect streak options by player
 	soByPlayer := make(map[string][]StreakPrediction)
