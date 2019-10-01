@@ -171,8 +171,8 @@ type RequestMessage struct {
 // PubSubMessage is the payload of a Pub/Sub event.
 type PubSubMessage struct {
 	Message struct {
-		Data *RequestMessage `json:"data,omitempty"`
-		ID   string          `json:"id"`
+		Data []byte `json:"data,omitempty"`
+		ID   string `json:"id"`
 	} `json:"message"`
 	Subscription string `json:"subscription"`
 }
@@ -190,9 +190,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Beating the streak, picker %s", psm.Message.Data.Picker)
-	weekNumber := psm.Message.Data.Week
-	pickerName := psm.Message.Data.Picker
+	var rm RequestMessage
+	err = json.Unmarshal(psm.Message.Data, &rm)
+	if check(w, err, http.StatusBadRequest) {
+		return
+	}
+
+	log.Printf("Beating the streak, picker %s", rm.Picker)
+	weekNumber := rm.Week
+	pickerName := rm.Picker
 
 	conf := &firebase.Config{}
 	app, err := firebase.NewApp(ctx, conf)
