@@ -11,6 +11,6 @@ steps:
   args: ['push', 'gcr.io/${PROJECT_ID}/bts-mc']
   # deploy to Cloud Run
 - name: 'gcr.io/cloud-builders/gcloud'
-  args: ['beta', 'run', 'deploy', 'bts-mc', '--image', 'gcr.io/${PROJECT_ID}/bts-mc', '--region', 'us-east1', '--platform', 'managed', '--quiet']
+  args: ['beta', 'run', 'deploy', 'bts-mc', '--image', 'gcr.io/${PROJECT_ID}/bts-mc', '--region', 'us-east1', '--platform', 'managed', '--concurrency', '1', '--quiet']
 images:
 - gcr.io/${PROJECT_ID}/bts-mc
