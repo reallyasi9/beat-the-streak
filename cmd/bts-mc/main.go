@@ -162,9 +162,19 @@ func main() {
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", port), nil))
 }
 
-type requestMessage struct {
+// RequestMessage is inside a PubSubMessage
+type RequestMessage struct {
 	Picker string `json:"picker"`
 	Week   *int   `json:"week"` // pointer, as this is optional, but could be zero
+}
+
+// PubSubMessage is the payload of a Pub/Sub event.
+type PubSubMessage struct {
+	Message struct {
+		Data *RequestMessage `json:"data,omitempty"`
+		ID   string          `json:"id"`
+	} `json:"message"`
+	Subscription string `json:"subscription"`
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -174,15 +184,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var rm requestMessage
-	err = json.Unmarshal(body, &rm)
+	var psm PubSubMessage
+	err = json.Unmarshal(body, &psm)
 	if check(w, err, http.StatusBadRequest) {
 		return
 	}
 
-	log.Printf("Beating the streak, picker %s", rm.Picker)
-	weekNumber := rm.Week
-	pickerName := rm.Picker
+	log.Printf("Beating the streak, picker %s", psm.Message.Data.Picker)
+	weekNumber := psm.Message.Data.Week
+	pickerName := psm.Message.Data.Picker
 
 	conf := &firebase.Config{}
 	app, err := firebase.NewApp(ctx, conf)
@@ -498,6 +508,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("Wrote streak %v", wr)
 	}
+
+	http.Error(w, http.StatusText(http.StatusOK), http.StatusOK)
 
 }
 

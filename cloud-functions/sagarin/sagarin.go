@@ -19,7 +19,6 @@ import (
 	"google.golang.org/api/iterator"
 
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2beta3"
-	taskspb "google.golang.org/genproto/googleapis/cloud/tasks/v2beta3"
 )
 
 // homeAdvRE parses Sagarin output for the home advantage line.
@@ -323,47 +322,4 @@ func parseSagarinTable(url string) (*HomeAdvantage, []Rating, error) {
 	}
 
 	return &adv, ratings, nil
-}
-
-// createBTSTask creates a task to queue up BTS calculations
-func createBTSTask(ctx context.Context, locationID, queueID, url string) (*taskspb.Task, error) {
-
-	// Create a new Cloud Tasks client instance.
-	// See https://godoc.org/cloud.google.com/go/cloudtasks/apiv2beta3
-	if ctclient == nil {
-		var err error
-		ctclient, err = cloudtasks.NewClient(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("NewClient: %v", err)
-		}
-	}
-
-	// Build the Task queue path.
-	queuePath := fmt.Sprintf("projects/%s/locations/%s/queues/%s", projectID, locationID, queueID)
-
-	// Build the Task payload.
-	// https://godoc.org/google.golang.org/genproto/googleapis/cloud/tasks/v2beta3#CreateTaskRequest
-	req := &taskspb.CreateTaskRequest{
-		Parent: queuePath,
-		Task: &taskspb.Task{
-			// https://godoc.org/google.golang.org/genproto/googleapis/cloud/tasks/v2beta3#HttpRequest
-			PayloadType: &taskspb.Task_HttpRequest{
-				HttpRequest: &taskspb.HttpRequest{
-					HttpMethod: taskspb.HttpMethod_POST,
-					Url:        url,
-				},
-			},
-		},
-	}
-
-	// Add a payload message if one is present.
-	req.Task.GetHttpRequest().Body = []byte(message)
-
-	createdTask, err := ctclient.CreateTask(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("cloudtasks.CreateTask: %v", err)
-	}
-
-	return createdTask, nil
-
 }
