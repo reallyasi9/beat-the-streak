@@ -232,7 +232,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	// With these in hand, calculate the week number if necessary
 	if weekNumber == nil {
-		seasonStart, err := seasonDoc.DataAt("season")
+		seasonStart, err := seasonDoc.DataAt("start")
 		if check(w, err, http.StatusInternalServerError) {
 			return
 		}
