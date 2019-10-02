@@ -242,8 +242,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		week := sagtime.(time.Time).Sub(seasonStart.(time.Time))
-		*weekNumber = int(week.Hours() / (24 * 7))
+		weekTime := sagtime.(time.Time).Sub(seasonStart.(time.Time))
+		week := int(weekTime.Hours() / (24 * 7))
+		weekNumber = &week
 		log.Printf("Determined week number %d from Sagarin and season start", *weekNumber)
 	} else {
 		log.Printf("Week number given as %d", *weekNumber)
