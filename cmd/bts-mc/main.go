@@ -221,6 +221,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	iter.Stop()
+	log.Printf("latest season discovered: %s", seasonDoc.Ref.ID)
 
 	// Get most recent Sagarin Ratings proper
 	iter = fs.Collection("sagarin").OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
@@ -229,6 +230,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	iter.Stop()
+	log.Printf("latest sagarin ratings discovered: %s", sagRateDoc.Ref.ID)
 
 	// With these in hand, calculate the week number if necessary
 	if weekNumber == nil {
@@ -255,6 +257,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	if check(w, err, http.StatusInternalServerError) {
 		return
 	}
+	log.Printf("picker loaded: %s", pickerRef.ID)
 
 	// Get most recent predictions
 	iter = fs.Collection("prediction_tracker").OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
@@ -263,6 +266,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	iter.Stop()
+	log.Printf("latest prediction reacker discovered: %s", predictionDoc.Ref.ID)
 
 	// Get Sagarin Rating performance
 	iter = predictionDoc.Ref.Collection("model_performance").Where("system", "==", "Sagarin Ratings").Limit(1).Documents(ctx)
@@ -271,6 +275,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	iter.Stop()
+	log.Printf("sagarin model performances discovered: %s", sagDoc.Ref.ID)
 
 	var sagPerf ModelPerformance
 	err = sagDoc.DataTo(&sagPerf)
@@ -305,11 +310,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Sagarin rating: %v", sr)
+		//log.Printf("Sagarin rating: %v", sr)
 		teamRefs = append(teamRefs, sr.Team)
 		ratings = append(ratings, sr.Rating)
 	}
 	iter.Stop()
+	log.Printf("team ratings filled")
 
 	teamDocs, err := fs.GetAll(ctx, teamRefs)
 	if check(w, err, http.StatusInternalServerError) {
@@ -324,7 +330,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("team %v", team)
+		// log.Printf("team %v", team)
 		teams[i] = team
 	}
 
@@ -413,6 +419,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	iter.Stop()
+	log.Printf("Picks loaded: %s", picksDoc.Ref.ID)
 
 	players := make(bts.PlayerMap)
 	// for fast lookups later
@@ -422,6 +429,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	iter.Stop()
+	log.Printf("Streak loaded: %s", pickDoc.Ref.ID)
 
 	var ps PickerStreak
 	err = pickDoc.DataTo(&ps)
