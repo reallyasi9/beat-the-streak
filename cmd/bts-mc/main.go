@@ -400,7 +400,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			game := bts.NewGame(team, op, ts.RelativeLocations[i])
-			log.Printf("game loaded %v", game)
+			//log.Printf("game loaded %v", game)
 			schedule[team][i] = game
 
 		}
@@ -413,6 +413,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Made predictions\n%s", predictions)
 
 	// Get picker remaining teams
+	log.Printf("Loading picks for season %s, week %d", seasonDoc.Ref.ID, *weekNumber)
 	iter = fs.Collection("picks").Where("season", "==", seasonDoc.Ref).Where("week", "==", weekNumber).Limit(1).Documents(ctx)
 	picksDoc, err := iter.Next()
 	if check(w, err, http.StatusInternalServerError) {
