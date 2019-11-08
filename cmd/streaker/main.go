@@ -123,7 +123,7 @@ type TypesYaml map[string][]int
 type Picks struct {
 	Season    *firestore.DocumentRef `firestore:"season"`
 	Week      int                    `firestore:"week"`
-	Timestamp time.Time              `firestore:"serverTimestamp"`
+	Timestamp time.Time              `firestore:"timestamp,serverTimestamp"`
 }
 
 // Streak is how a picker's remaining picks are stored
@@ -194,7 +194,7 @@ func main() {
 	} else {
 		yt, err := ioutil.ReadFile(*typesYaml)
 		if err != nil {
-			log.Printf("cannot read types YAML file \"%s\": ignoring")
+			log.Printf("cannot read types YAML file \"%s\": ignoring", *typesYaml)
 		} else {
 			err = yaml.Unmarshal(yt, &typ)
 			if err != nil {
@@ -222,7 +222,7 @@ func main() {
 	}
 
 	// Write everything in transaction
-	picksRef := fsclient.Collection("picks").NewDoc()
+	picksRef := fsclient.Collection("streak_teams_remaining").NewDoc()
 	picksDoc := Picks{
 		Season: seasonRef,
 		Week:   *weekNumber,
