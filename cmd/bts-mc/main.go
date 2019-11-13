@@ -266,7 +266,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	iter.Stop()
-	log.Printf("latest prediction reacker discovered: %s", predictionDoc.Ref.ID)
+	log.Printf("latest prediction tracker discovered: %s", predictionDoc.Ref.ID)
 
 	// Get Sagarin Rating performance
 	iter = predictionDoc.Ref.Collection("model_performance").Where("system", "==", "Sagarin Ratings").Limit(1).Documents(ctx)
@@ -414,7 +414,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	// Get picker remaining teams
 	log.Printf("Loading picks for season %s, week %d", seasonDoc.Ref.ID, *weekNumber)
-	iter = fs.Collection("streak_teams_remaining").Where("season", "==", seasonDoc.Ref).Where("week", "==", weekNumber).OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
+	iter = fs.Collection("streak_teams_remaining").Where("season", "==", seasonDoc.Ref).Where("week", "==", *weekNumber).OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
 	picksDoc, err := iter.Next()
 	if check(w, err, http.StatusInternalServerError) {
 		return
@@ -422,8 +422,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	iter.Stop()
 	log.Printf("Picks loaded: %s", picksDoc.Ref.ID)
 
-	players := make(bts.PlayerMap)
 	// for fast lookups later
+	players := make(bts.PlayerMap)
+
 	iter = picksDoc.Ref.Collection("streaks").Where("picker", "==", pickerRef).Limit(1).Documents(ctx)
 	pickDoc, err := iter.Next()
 	if check(w, err, http.StatusInternalServerError) {
