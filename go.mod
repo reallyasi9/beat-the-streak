@@ -1,6 +1,6 @@
 module github.com/reallyasi9/beat-the-streak
 
-go 1.12
+go 1.13
 
 require (
 	cloud.google.com/go/firestore v1.0.0
