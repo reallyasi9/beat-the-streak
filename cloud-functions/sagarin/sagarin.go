@@ -21,22 +21,27 @@ import (
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2beta3"
 )
 
+const ratingColor = "<font color=\"#9900ff\">"
+const predictorColor = "<font color=\"#0000ff\">"
+const goldenColor = "<font color=\"#bb0000\">"
+const recentColor = "<font color=\"#006B3C\">"
+
 // homeAdvRE parses Sagarin output for the home advantage line.
 var homeAdvRE = regexp.MustCompile("HOME ADVANTAGE=" +
-	"\\[<font color=\"#9900ff\">\\s*([\\-0-9.]+)</font>\\]\\s*" + // RATING
-	"\\[<font color=\"#0000ff\">\\s*([\\-0-9.]+)</font>\\]\\s*" + // POINTS
-	"\\[<font color=\"#ff0000\">\\s*([\\-0-9.]+)</font>\\]\\s*" + // GOLDEN_MEAN
-	"\\[<font color=\"#4cc417\">\\s*([\\-0-9.]+)</font>\\]") // RECENT
+	"\\[" + ratingColor + "\\s*([\\-0-9.]+)</font>\\]\\s*" + // RATING
+	"\\[" + predictorColor + "\\s*([\\-0-9.]+)</font>\\]\\s*" + // POINTS
+	"\\[" + goldenColor + "\\s*([\\-0-9.]+)</font>\\]\\s*" + // GOLDEN_MEAN
+	"\\[" + recentColor + "\\s*([\\-0-9.]+)</font>\\]") // RECENT
 
 // ratingsRE parses Sagarin output for each team's rating.
 var ratingsRE = regexp.MustCompile("<font color=\"#000000\">\\s*" +
 	"\\d+\\s+" + // rank
 	"(.*?)\\s+" + // name
 	"[A]+\\s*=</font>" + // league
-	"<font color=\"#9900ff\">\\s*([\\-0-9.]+)</font>.*?" + // RATING
-	"<font color=\"#0000ff\">\\s*([\\-0-9.]+)\\s.*?</font>.*?" + // POINTS
-	"<font color=\"#ff0000\">\\s*([\\-0-9.]+)\\s.*?</font>.*?" + // GOLDEN_MEAN
-	"<font color=\"#4cc417\">\\s*([\\-0-9.]+)\\s.*?</font>") // RECENT
+	ratingColor + "\\s*([\\-0-9.]+)</font>.*?" + // RATING
+	predictorColor + "\\s*([\\-0-9.]+)\\s.*?</font>.*?" + // POINTS
+	goldenColor + "\\s*([\\-0-9.]+)\\s.*?</font>.*?" + // GOLDEN_MEAN
+	recentColor + "\\s*([\\-0-9.]+)\\s.*?</font>") // RECENT
 
 // once makes sure functions are only run once.
 var once sync.Once

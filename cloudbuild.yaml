@@ -1,7 +1,7 @@
 steps:
   # deploy the scraper function
 - name: 'gcr.io/cloud-builders/gcloud'
-  args: ['functions', 'deploy', '${_GCF_NAME}', '--runtime', 'go111', '--trigger-topic', '${_PUBSUB_TOPIC}', '--entry-point', 'ScrapeSagarin']
+  args: ['functions', 'deploy', '${_GCF_NAME}', '--runtime', 'go113', '--trigger-topic', '${_PUBSUB_TOPIC}', '--entry-point', 'ScrapeSagarin']
   dir: 'cloud-functions/sagarin'
   # build the processing container image
 - name: 'gcr.io/cloud-builders/docker'
