@@ -3,9 +3,11 @@ steps:
 - name: 'gcr.io/cloud-builders/gcloud'
   args: ['functions', 'deploy', '${_GCF_NAME}', '--runtime', 'go113', '--trigger-topic', '${_PUBSUB_TOPIC}', '--entry-point', 'ScrapeSagarin']
   dir: 'cloud-functions/sagarin'
+  timeout: '1600s'
   # build the processing container image
 - name: 'gcr.io/cloud-builders/docker'
   args: ['build', '-t', 'gcr.io/${PROJECT_ID}/bts-mc', '.']
+  timeout: '1600s'
   # push the image to Container Registry
 - name: 'gcr.io/cloud-builders/docker'
   args: ['push', 'gcr.io/${PROJECT_ID}/bts-mc']
