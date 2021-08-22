@@ -317,7 +317,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	iter.Stop()
-	log.Printf("latest prediction reacker discovered: %s", predictionDoc.Ref.ID)
+	log.Printf("latest prediction tracker discovered: %s", predictionDoc.Ref.ID)
 
 	// Get Sagarin Rating performance
 	iter = predictionDoc.Ref.Collection("model_performance").Where("system", "==", "Sagarin Ratings").Limit(1).Documents(ctx)
@@ -533,9 +533,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// Find the unique users.
 	// Legacy code!
 	duplicates := players.Duplicates()
-	log.Println("The following users are clones of one another:")
+	log.Println("The following users are unique clones of one another:")
 	for user, clones := range duplicates {
-		log.Printf("%s clones %v", user, clones)
+		if len(clones) == 0 {
+			log.Printf("%s is unique", user)
+		} else {
+			log.Printf("%s clones %v", user, clones)
+		}
 		for _, clone := range clones {
 			delete(players, clone)
 		}
