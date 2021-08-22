@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"sort"
 	"sync"
@@ -149,8 +153,52 @@ func pickerRefLookup(ctx context.Context, fs *firestore.Client, name string) (*f
 	return pickerRef.Ref, nil
 }
 
+var pickerFlag = flag.String("picker", "", "Picker to simulate.")
+var weekFlag = flag.Int("week", -1, "Week to simulate (starting at 0 for preseason).")
+
+func mockRequest(picker string, week *int) (*httptest.ResponseRecorder, *http.Request) {
+	rm := RequestMessage{Picker: picker, Week: week}
+	rmJson, err := json.Marshal(rm)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	psm := PubSubMessage{
+		Message: innerMessage{
+			Data: rmJson,
+			ID:   "example-id",
+		},
+		Subscription: "example-subscription",
+	}
+	psmJson, _ := json.Marshal(psm)
+	reqBody := bytes.NewReader((psmJson))
+
+	req := httptest.NewRequest("POST", "https://example.com/foo", reqBody)
+	w := httptest.NewRecorder()
+
+	return w, req
+}
+
 func main() {
 	log.Print("Beating the streak")
+
+	flag.Parse()
+
+	if *pickerFlag != "" {
+		log.Printf("Mocking HTTP request for picker %s week %d", *pickerFlag, *weekFlag)
+		w, req := mockRequest(*pickerFlag, weekFlag)
+		handler(w, req)
+
+		resp := w.Result()
+		body, _ := io.ReadAll(resp.Body)
+
+		if resp.StatusCode != 200 {
+			err := fmt.Errorf("status code %d: %s", resp.StatusCode, body)
+			log.Fatal(err)
+		}
+
+		return
+	}
 
 	http.HandleFunc("/", handler)
 
@@ -168,13 +216,16 @@ type RequestMessage struct {
 	Week   *int   `json:"week"` // pointer, as this is optional, but could be zero
 }
 
+// InnerMessage is the inner payload of a Pub/Sub event.
+type innerMessage struct {
+	Data []byte `json:"data,omitempty"`
+	ID   string `json:"id"`
+}
+
 // PubSubMessage is the payload of a Pub/Sub event.
 type PubSubMessage struct {
-	Message struct {
-		Data []byte `json:"data,omitempty"`
-		ID   string `json:"id"`
-	} `json:"message"`
-	Subscription string `json:"subscription"`
+	Message      innerMessage `json:"message"`
+	Subscription string       `json:"subscription"`
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
