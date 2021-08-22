@@ -648,32 +648,30 @@ func playerIterator(pm bts.PlayerMap) <-chan *bts.Player {
 
 func perPlayerTeamStreaks(ps <-chan *bts.Player, predictions *bts.Predictions) <-chan playerTeamStreakProb {
 
-	out := make(chan playerTeamStreakProb)
+	out := make(chan playerTeamStreakProb, 100)
 
 	go func() {
 		var wg sync.WaitGroup
 
 		for p := range ps {
-			wg.Add(1)
-
-			go func(p *bts.Player) {
-				for weekOrder := range p.WeekTypeIterator() {
-					for teamOrder := range p.RemainingIterator() {
+			for weekOrder := range p.WeekTypeIterator() {
+				for teamOrder := range p.RemainingIterator() {
+					wg.Add(1)
+					go func(p *bts.Player, weekOrder, teamOrder []int) {
 						streak := bts.NewStreak(p.RemainingTeams(), weekOrder, teamOrder)
 						prob, spread := bts.SummarizeStreak(predictions, streak)
 						if prob <= 0 {
 							// Ignore streaks that guarantee a loss.
-							continue
+							return
 						}
 						for _, team := range streak.GetWeek(0) {
 							sp := streakProb{streak: streak, prob: prob, spread: spread}
 							out <- playerTeamStreakProb{player: p, team: team, streakProb: sp}
 						}
-					}
+						wg.Done()
+					}(p, weekOrder, teamOrder)
 				}
-				wg.Done()
-			}(p)
-
+			}
 		}
 		wg.Wait()
 		close(out)
@@ -683,7 +681,7 @@ func perPlayerTeamStreaks(ps <-chan *bts.Player, predictions *bts.Predictions) <
 }
 
 func calculateBestStreaks(ppts <-chan playerTeamStreakProb) <-chan streakMap {
-	out := make(chan streakMap)
+	out := make(chan streakMap, 100)
 
 	sm := make(streakMap)
 	go func() {
