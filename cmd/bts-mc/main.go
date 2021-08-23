@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -648,31 +649,51 @@ func playerIterator(pm bts.PlayerMap) <-chan *bts.Player {
 
 func perPlayerTeamStreaks(ps <-chan *bts.Player, predictions *bts.Predictions) <-chan playerTeamStreakProb {
 
+	type itr struct {
+		player    *bts.Player
+		weekOrder []int
+		teamOrder []int
+	}
+	iterator := make(chan itr, 100)
 	out := make(chan playerTeamStreakProb, 100)
 
-	go func() {
-		var wg sync.WaitGroup
+	// There can be up to (nweeks)! streaks to calculate, which might overflow a waitgroup.
+	// Use a workerpool with a fixed number of workers instead.
 
+	maxWorkers := 2 * runtime.GOMAXPROCS(0)
+	var wg sync.WaitGroup
+	wg.Add(maxWorkers)
+	for i := 0; i < maxWorkers; i++ {
+		go func(iterator <-chan itr, results chan<- playerTeamStreakProb) {
+			for i := range iterator {
+				streak := bts.NewStreak(i.player.RemainingTeams(), i.weekOrder, i.teamOrder)
+				prob, spread := bts.SummarizeStreak(predictions, streak)
+				if prob <= 0 {
+					// Ignore streaks that guarantee a loss.
+					continue
+				}
+				for _, team := range streak.GetWeek(0) {
+					sp := streakProb{streak: streak, prob: prob, spread: spread}
+					out <- playerTeamStreakProb{player: i.player, team: team, streakProb: sp}
+				}
+			}
+			// Once the iterator closes, signal done to calling scope
+			wg.Done()
+		}(iterator, out)
+	}
+	go func() {
 		for p := range ps {
 			for weekOrder := range p.WeekTypeIterator() {
 				for teamOrder := range p.RemainingIterator() {
-					wg.Add(1)
-					go func(p *bts.Player, weekOrder, teamOrder []int) {
-						streak := bts.NewStreak(p.RemainingTeams(), weekOrder, teamOrder)
-						prob, spread := bts.SummarizeStreak(predictions, streak)
-						if prob <= 0 {
-							// Ignore streaks that guarantee a loss.
-							return
-						}
-						for _, team := range streak.GetWeek(0) {
-							sp := streakProb{streak: streak, prob: prob, spread: spread}
-							out <- playerTeamStreakProb{player: p, team: team, streakProb: sp}
-						}
-						wg.Done()
-					}(p, weekOrder, teamOrder)
+					iterator <- itr{
+						player:    p,
+						weekOrder: weekOrder,
+						teamOrder: teamOrder,
+					}
 				}
 			}
 		}
+		close(iterator)
 		wg.Wait()
 		close(out)
 	}()
