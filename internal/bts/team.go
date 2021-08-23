@@ -1,9 +1,5 @@
 package bts
 
-import (
-	"fmt"
-)
-
 // Team play game against Team.
 type Team struct {
 	Name4 string `firestore:"name_4"`
@@ -41,18 +37,16 @@ func (t TeamList) Swap(i, j int) {
 // Clone just clones the probabilities.
 func (t TeamList) Clone() TeamList {
 	out := make(TeamList, t.Len())
-	for i, team := range t {
-		out[i] = team
-	}
+	copy(out, t)
 	return out
 }
 
 // Validate a TeamList against a given Probabilities map.
-func (t TeamList) validate(p Predictions) error {
-	for _, team := range t {
-		if _, ok := p.probs[team]; !ok {
-			return fmt.Errorf("team '%s' not in predictions", team)
-		}
-	}
-	return nil
-}
+// func (t TeamList) validate(p Predictions) error {
+// 	for _, team := range t {
+// 		if _, ok := p.probs[team]; !ok {
+// 			return fmt.Errorf("team '%s' not in predictions", team)
+// 		}
+// 	}
+// 	return nil
+// }

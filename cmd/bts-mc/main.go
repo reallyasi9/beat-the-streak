@@ -1,14 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -149,8 +154,52 @@ func pickerRefLookup(ctx context.Context, fs *firestore.Client, name string) (*f
 	return pickerRef.Ref, nil
 }
 
+var pickerFlag = flag.String("picker", "", "Picker to simulate.")
+var weekFlag = flag.Int("week", -1, "Week to simulate (starting at 0 for preseason).")
+
+func mockRequest(picker string, week *int) (*httptest.ResponseRecorder, *http.Request) {
+	rm := RequestMessage{Picker: picker, Week: week}
+	rmJson, err := json.Marshal(rm)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	psm := PubSubMessage{
+		Message: innerMessage{
+			Data: rmJson,
+			ID:   "example-id",
+		},
+		Subscription: "example-subscription",
+	}
+	psmJson, _ := json.Marshal(psm)
+	reqBody := bytes.NewReader((psmJson))
+
+	req := httptest.NewRequest("POST", "https://example.com/foo", reqBody)
+	w := httptest.NewRecorder()
+
+	return w, req
+}
+
 func main() {
 	log.Print("Beating the streak")
+
+	flag.Parse()
+
+	if *pickerFlag != "" {
+		log.Printf("Mocking HTTP request for picker %s week %d", *pickerFlag, *weekFlag)
+		w, req := mockRequest(*pickerFlag, weekFlag)
+		handler(w, req)
+
+		resp := w.Result()
+		body, _ := io.ReadAll(resp.Body)
+
+		if resp.StatusCode != 200 {
+			err := fmt.Errorf("status code %d: %s", resp.StatusCode, body)
+			log.Fatal(err)
+		}
+
+		return
+	}
 
 	http.HandleFunc("/", handler)
 
@@ -168,13 +217,16 @@ type RequestMessage struct {
 	Week   *int   `json:"week"` // pointer, as this is optional, but could be zero
 }
 
+// InnerMessage is the inner payload of a Pub/Sub event.
+type innerMessage struct {
+	Data []byte `json:"data,omitempty"`
+	ID   string `json:"id"`
+}
+
 // PubSubMessage is the payload of a Pub/Sub event.
 type PubSubMessage struct {
-	Message struct {
-		Data []byte `json:"data,omitempty"`
-		ID   string `json:"id"`
-	} `json:"message"`
-	Subscription string `json:"subscription"`
+	Message      innerMessage `json:"message"`
+	Subscription string       `json:"subscription"`
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -483,9 +535,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// Find the unique users.
 	// Legacy code!
 	duplicates := players.Duplicates()
-	log.Println("The following users are clones of one another:")
+	log.Println("The following users are unique clones of one another:")
 	for user, clones := range duplicates {
-		log.Printf("%s clones %v", user, clones)
+		if len(clones) == 0 {
+			log.Printf("%s is unique", user)
+		} else {
+			log.Printf("%s clones %v", user, clones)
+		}
 		for _, clone := range clones {
 			delete(players, clone)
 		}
@@ -557,20 +613,20 @@ func (sm *streakMap) update(player string, team bts.Team, spin streakProb) {
 	}
 }
 
-func (sm streakMap) getBest(player string) streakProb {
-	bestp := math.Inf(-1)
-	bests := math.Inf(-1)
-	bestt := bts.BYE
-	for pt, sp := range sm {
-		if pt.player != player {
-			continue
-		}
-		if sp.prob > bestp || (sp.prob == bestp && sp.spread > bests) {
-			bestt = pt.team
-		}
-	}
-	return sm[playerTeam{player: player, team: bestt}]
-}
+// func (sm streakMap) getBest(player string) streakProb {
+// 	bestp := math.Inf(-1)
+// 	bests := math.Inf(-1)
+// 	bestt := bts.BYE
+// 	for pt, sp := range sm {
+// 		if pt.player != player {
+// 			continue
+// 		}
+// 		if sp.prob > bestp || (sp.prob == bestp && sp.spread > bests) {
+// 			bestt = pt.team
+// 		}
+// 	}
+// 	return sm[playerTeam{player: player, team: bestt}]
+// }
 
 type playerTeamStreakProb struct {
 	player     *bts.Player
@@ -594,33 +650,51 @@ func playerIterator(pm bts.PlayerMap) <-chan *bts.Player {
 
 func perPlayerTeamStreaks(ps <-chan *bts.Player, predictions *bts.Predictions) <-chan playerTeamStreakProb {
 
-	out := make(chan playerTeamStreakProb)
+	type itr struct {
+		player    *bts.Player
+		weekOrder []int
+		teamOrder []int
+	}
+	iterator := make(chan itr, 100)
+	out := make(chan playerTeamStreakProb, 100)
 
+	// There can be up to (nweeks)! streaks to calculate, which might overflow a waitgroup.
+	// Use a workerpool with a fixed number of workers instead.
+
+	maxWorkers := 2 * runtime.GOMAXPROCS(0)
+	var wg sync.WaitGroup
+	wg.Add(maxWorkers)
+	for i := 0; i < maxWorkers; i++ {
+		go func(iterator <-chan itr, results chan<- playerTeamStreakProb) {
+			for i := range iterator {
+				streak := bts.NewStreak(i.player.RemainingTeams(), i.weekOrder, i.teamOrder)
+				prob, spread := bts.SummarizeStreak(predictions, streak)
+				if prob <= 0 {
+					// Ignore streaks that guarantee a loss.
+					continue
+				}
+				for _, team := range streak.GetWeek(0) {
+					sp := streakProb{streak: streak, prob: prob, spread: spread}
+					out <- playerTeamStreakProb{player: i.player, team: team, streakProb: sp}
+				}
+			}
+			// Once the iterator closes, signal done to calling scope
+			wg.Done()
+		}(iterator, out)
+	}
 	go func() {
-		var wg sync.WaitGroup
-
 		for p := range ps {
-			wg.Add(1)
-
-			go func(p *bts.Player) {
-				for weekOrder := range p.WeekTypeIterator() {
-					for teamOrder := range p.RemainingIterator() {
-						streak := bts.NewStreak(p.RemainingTeams(), weekOrder, teamOrder)
-						prob, spread := bts.SummarizeStreak(predictions, streak)
-						if prob <= 0 {
-							// Ignore streaks that guarantee a loss.
-							continue
-						}
-						for _, team := range streak.GetWeek(0) {
-							sp := streakProb{streak: streak, prob: prob, spread: spread}
-							out <- playerTeamStreakProb{player: p, team: team, streakProb: sp}
-						}
+			for weekOrder := range p.WeekTypeIterator() {
+				for teamOrder := range p.RemainingIterator() {
+					iterator <- itr{
+						player:    p,
+						weekOrder: weekOrder,
+						teamOrder: teamOrder,
 					}
 				}
-				wg.Done()
-			}(p)
-
+			}
 		}
+		close(iterator)
 		wg.Wait()
 		close(out)
 	}()
@@ -629,7 +703,7 @@ func perPlayerTeamStreaks(ps <-chan *bts.Player, predictions *bts.Predictions) <
 }
 
 func calculateBestStreaks(ppts <-chan playerTeamStreakProb) <-chan streakMap {
-	out := make(chan streakMap)
+	out := make(chan streakMap, 100)
 
 	sm := make(streakMap)
 	go func() {
@@ -729,15 +803,15 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 	return prs
 }
 
-func determineWeekNumber(players bts.PlayerMap, schedule *bts.Schedule) int {
-	guess := -1
-	for name, player := range players {
-		thisGuess := player.RemainingWeeks()
-		if guess >= 0 && thisGuess != guess {
-			panic(fmt.Errorf("player %s has an invalid number of weeks remaining: expected %d, found %d", name, thisGuess, guess))
-		}
-		guess = thisGuess
-	}
-	week := schedule.NumWeeks() - guess
-	return week
-}
+// func determineWeekNumber(players bts.PlayerMap, schedule *bts.Schedule) int {
+// 	guess := -1
+// 	for name, player := range players {
+// 		thisGuess := player.RemainingWeeks()
+// 		if guess >= 0 && thisGuess != guess {
+// 			panic(fmt.Errorf("player %s has an invalid number of weeks remaining: expected %d, found %d", name, thisGuess, guess))
+// 		}
+// 		guess = thisGuess
+// 	}
+// 	week := schedule.NumWeeks() - guess
+// 	return week
+// }

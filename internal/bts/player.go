@@ -141,11 +141,7 @@ func (pm PlayerMap) Duplicates() map[string][]string {
 		for _, weektype := range player.weekTypes.sets {
 			hash = jody.AddUint64(hash, uint64(weektype))
 		}
-		if _, ok := playerHashes[hash]; ok {
-			playerHashes[hash] = append(playerHashes[hash], name)
-		} else {
-			playerHashes[hash] = []string{name}
-		}
+		playerHashes[hash] = append(playerHashes[hash], name)
 	}
 
 	out := make(map[string][]string)
