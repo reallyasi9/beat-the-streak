@@ -612,20 +612,20 @@ func (sm *streakMap) update(player string, team bts.Team, spin streakProb) {
 	}
 }
 
-func (sm streakMap) getBest(player string) streakProb {
-	bestp := math.Inf(-1)
-	bests := math.Inf(-1)
-	bestt := bts.BYE
-	for pt, sp := range sm {
-		if pt.player != player {
-			continue
-		}
-		if sp.prob > bestp || (sp.prob == bestp && sp.spread > bests) {
-			bestt = pt.team
-		}
-	}
-	return sm[playerTeam{player: player, team: bestt}]
-}
+// func (sm streakMap) getBest(player string) streakProb {
+// 	bestp := math.Inf(-1)
+// 	bests := math.Inf(-1)
+// 	bestt := bts.BYE
+// 	for pt, sp := range sm {
+// 		if pt.player != player {
+// 			continue
+// 		}
+// 		if sp.prob > bestp || (sp.prob == bestp && sp.spread > bests) {
+// 			bestt = pt.team
+// 		}
+// 	}
+// 	return sm[playerTeam{player: player, team: bestt}]
+// }
 
 type playerTeamStreakProb struct {
 	player     *bts.Player
@@ -802,15 +802,15 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 	return prs
 }
 
-func determineWeekNumber(players bts.PlayerMap, schedule *bts.Schedule) int {
-	guess := -1
-	for name, player := range players {
-		thisGuess := player.RemainingWeeks()
-		if guess >= 0 && thisGuess != guess {
-			panic(fmt.Errorf("player %s has an invalid number of weeks remaining: expected %d, found %d", name, thisGuess, guess))
-		}
-		guess = thisGuess
-	}
-	week := schedule.NumWeeks() - guess
-	return week
-}
+// func determineWeekNumber(players bts.PlayerMap, schedule *bts.Schedule) int {
+// 	guess := -1
+// 	for name, player := range players {
+// 		thisGuess := player.RemainingWeeks()
+// 		if guess >= 0 && thisGuess != guess {
+// 			panic(fmt.Errorf("player %s has an invalid number of weeks remaining: expected %d, found %d", name, thisGuess, guess))
+// 		}
+// 		guess = thisGuess
+// 	}
+// 	week := schedule.NumWeeks() - guess
+// 	return week
+// }
