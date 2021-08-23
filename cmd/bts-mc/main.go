@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -660,7 +659,7 @@ func perPlayerTeamStreaks(ps <-chan *bts.Player, predictions *bts.Predictions) <
 	// There can be up to (nweeks)! streaks to calculate, which might overflow a waitgroup.
 	// Use a workerpool with a fixed number of workers instead.
 
-	maxWorkers := 2 * runtime.GOMAXPROCS(0)
+	maxWorkers := 100
 	var wg sync.WaitGroup
 	wg.Add(maxWorkers)
 	for i := 0; i < maxWorkers; i++ {
