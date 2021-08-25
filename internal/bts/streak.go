@@ -14,7 +14,11 @@ type Streak struct {
 
 // NewStreak creates a Streak from a list of teams, a selected number of picks per week, and a permutation of the teams into the week.
 func NewStreak(teamList Remaining, picksPerWeek []int) *Streak {
-	return &Streak{numberOfPicks: picksPerWeek, teamOrder: TeamList(teamList)}
+	ppw := make([]int, len(picksPerWeek))
+	tl := make(Remaining, len(teamList))
+	copy(ppw, picksPerWeek)
+	copy(tl, teamList)
+	return &Streak{numberOfPicks: ppw, teamOrder: TeamList(tl)}
 }
 
 // PermuteTeamOrder permutes the order of the streak by the given permutation index.
@@ -44,10 +48,10 @@ func (s *Streak) GetWeek(week int) TeamList {
 		return TeamList{NONE} // Bye week
 	}
 	pick := 0
-	for i := 0; i < week-1; i++ {
+	for i := 0; i < week; i++ {
 		pick += s.numberOfPicks[i]
 	}
-	return s.teamOrder[pick:s.numberOfPicks[week]]
+	return s.teamOrder[pick : pick+s.numberOfPicks[week]]
 }
 
 // FindTeam returns the first week in which the given team was selected.
@@ -94,7 +98,7 @@ func (s *Streak) NumWeeks() int {
 func (s *Streak) String() string {
 	pick := 0
 
-	pickMap := make(map[int][]string)
+	pickMap := make([][]string, s.NumWeeks())
 
 	for week, ppw := range s.numberOfPicks {
 		if ppw == 0 {
