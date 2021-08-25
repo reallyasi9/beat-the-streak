@@ -665,7 +665,8 @@ func perPlayerTeamStreaks(ps <-chan *bts.Player, predictions *bts.Predictions) <
 	for i := 0; i < maxWorkers; i++ {
 		go func(iterator <-chan itr, results chan<- playerTeamStreakProb) {
 			for i := range iterator {
-				streak := bts.NewStreak(i.player.RemainingTeams(), i.weekOrder, i.teamOrder)
+				streak := bts.NewStreak(i.player.RemainingTeams(), i.weekOrder)
+				streak.PermuteTeamOrder(i.teamOrder)
 				prob, spread := bts.SummarizeStreak(predictions, streak)
 				if prob <= 0 {
 					// Ignore streaks that guarantee a loss.
