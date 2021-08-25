@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -155,6 +156,12 @@ func pickerRefLookup(ctx context.Context, fs *firestore.Client, name string) (*f
 
 var pickerFlag = flag.String("picker", "", "Picker to simulate.")
 var weekFlag = flag.Int("week", -1, "Week to simulate (starting at 0 for preseason).")
+var maxItr = flag.Int("maxi", 1000000000, "Number of simulated annealing iterations.")
+var tC = flag.Float64("tc", 1., "Simulated annealing temperature constant: p = (tc * (maxi - i) / maxi)^te.")
+var tE = flag.Float64("te", 3., "Simulated annealing temperature exponent: p = (tc * (maxi - i) / maxi)^te.")
+var resetItr = flag.Int("reseti", 10000, "Maximum number of iterations to allow simulated annealing solution to wonder before resetting to best solution found so far.")
+var seed = flag.Int64("seed", -1, "Seed for RNG governing simulated annealing process. Negative values will use system clock to seed RNG.")
+var workers = flag.Int("workers", 1, "Number of workers per simulated picker. Increases odds of finding the global maximum.")
 
 func mockRequest(picker string, week *int) (*httptest.ResponseRecorder, *http.Request) {
 	rm := RequestMessage{Picker: picker, Week: week}
@@ -320,7 +327,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("latest prediction tracker discovered: %s", predictionDoc.Ref.ID)
 
 	// Get Sagarin Rating performance
-	iter = predictionDoc.Ref.Collection("model_performance").Where("system", "==", "Sagarin Ratings").Limit(1).Documents(ctx)
+	iter = predictionDoc.Ref.Collection("model_performance").Where("system", "==", "Sagarin Points").Limit(1).Documents(ctx)
 	sagDoc, err := iter.Next()
 	if check(w, err, http.StatusInternalServerError) {
 		return
@@ -648,57 +655,100 @@ func playerIterator(pm bts.PlayerMap) <-chan *bts.Player {
 
 func perPlayerTeamStreaks(ps <-chan *bts.Player, predictions *bts.Predictions) <-chan playerTeamStreakProb {
 
-	type itr struct {
-		player    *bts.Player
-		weekOrder []int
-		teamOrder []int
-	}
-	iterator := make(chan itr, 100)
 	out := make(chan playerTeamStreakProb, 100)
 
-	// There can be up to (nweeks)! streaks to calculate, which might overflow a waitgroup.
-	// Use a workerpool with a fixed number of workers instead.
-
-	maxWorkers := 100
-	var wg sync.WaitGroup
-	wg.Add(maxWorkers)
-	for i := 0; i < maxWorkers; i++ {
-		go func(iterator <-chan itr, results chan<- playerTeamStreakProb) {
-			for i := range iterator {
-				streak := bts.NewStreak(i.player.RemainingTeams(), i.weekOrder)
-				streak.PermuteTeamOrder(i.teamOrder)
-				prob, spread := bts.SummarizeStreak(predictions, streak)
-				if prob <= 0 {
-					// Ignore streaks that guarantee a loss.
-					continue
-				}
-				for _, team := range streak.GetWeek(0) {
-					sp := streakProb{streak: streak, prob: prob, spread: spread}
-					out <- playerTeamStreakProb{player: i.player, team: team, streakProb: sp}
-				}
-			}
-			// Once the iterator closes, signal done to calling scope
-			wg.Done()
-		}(iterator, out)
-	}
-	go func() {
+	go func(out chan<- playerTeamStreakProb) {
+		var wg sync.WaitGroup
+		sd := *seed
+		if sd < 0 {
+			sd = time.Now().UnixNano()
+		}
+		src := rand.NewSource(sd)
 		for p := range ps {
-			for weekOrder := range p.WeekTypeIterator() {
-				for teamOrder := range p.RemainingIterator() {
-					iterator <- itr{
-						player:    p,
-						weekOrder: weekOrder,
-						teamOrder: teamOrder,
-					}
-				}
+			for i := 0; i < *workers; i++ {
+				wg.Add(1)
+				mySeed := src.Int63()
+				go func(p *bts.Player, out chan<- playerTeamStreakProb) {
+					anneal(mySeed, p, predictions, out)
+					wg.Done()
+				}(p, out)
 			}
 		}
-		close(iterator)
 		wg.Wait()
 		close(out)
-	}()
+	}(out)
 
 	return out
+}
+
+func anneal(seed int64, p *bts.Player, predictions *bts.Predictions, out chan<- playerTeamStreakProb) {
+
+	src := rand.NewSource(seed)
+	rng := rand.New(src)
+
+	maxIterations := *maxItr
+	tConst := *tC
+	tExp := *tE
+	maxDrift := *resetItr
+	countSinceReset := maxDrift
+
+	s := bts.NewStreak(p.RemainingTeams(), <-p.WeekTypeIterator())
+	bestS := s.Clone()
+	resetS := s.Clone()
+	bestP := 0.
+	resetP := 0.
+	bestSpread := 0.
+	resetSpread := 0.
+
+	log.Printf("Player %s start: p=%f, s=%f, streak=%s", p.Name(), bestP, bestSpread, bestS)
+	for i := 0; i < maxIterations; i++ {
+		temperature := tConst * float64(maxIterations-i) / float64(maxIterations)
+		temperature = math.Pow(temperature, tExp)
+
+		s.Perturbate(src, true)
+		newP, newSpread := bts.SummarizeStreak(predictions, s)
+
+		// ignore impossible outcomes
+		if newP == 0 {
+			continue
+		}
+
+		if newP > bestP || (newP == bestP && newSpread > bestSpread) || (bestP-newP)*temperature > rng.Float64() {
+
+			// if newP <= bestP {
+			// 	log.Printf("Player %s accepted worse outcome due to temperature", p.Name())
+			// }
+
+			bestP = newP
+			bestSpread = newSpread
+			bestS = s.Clone()
+
+			if bestP > resetP {
+				resetP = bestP
+				resetSpread = bestSpread
+				resetS = bestS.Clone()
+				countSinceReset = maxDrift
+
+				for _, team := range resetS.GetWeek(0) {
+					sp := streakProb{streak: resetS.Clone(), prob: resetP, spread: resetSpread}
+					out <- playerTeamStreakProb{player: p, team: team, streakProb: sp}
+				}
+
+				log.Printf("Player %s itr %d (temp %f): p=%f, s=%f, streak=%s", p.Name(), i, temperature, bestP, bestSpread, bestS)
+			}
+
+		} else if countSinceReset < 0 {
+			countSinceReset = maxDrift
+			bestP = resetP
+			bestSpread = resetSpread
+			// bestS = resetS.Clone()
+			s = resetS.Clone()
+
+			// log.Printf("Player %s reset at itr %d to p=%f, s=%f, streak=%s", p.Name(), i, bestP, bestSpread, bestS)
+		}
+
+		countSinceReset--
+	}
 }
 
 func calculateBestStreaks(ppts <-chan playerTeamStreakProb) <-chan streakMap {
@@ -754,12 +804,7 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 			}
 
 			so := StreakPrediction{CumulativeProbability: prob, CumulativeSpread: spread, Weeks: weeks}
-			if sos, ok := soByPlayer[pt.player]; ok {
-				soByPlayer[pt.player] = append(sos, so)
-			} else {
-				soByPlayer[pt.player] = []StreakPrediction{so}
-			}
-
+			soByPlayer[pt.player] = append(soByPlayer[pt.player], so)
 		}
 
 	}
