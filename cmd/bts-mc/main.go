@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math"
+	"math/rand"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"sort"
 	"sync"
@@ -149,8 +154,58 @@ func pickerRefLookup(ctx context.Context, fs *firestore.Client, name string) (*f
 	return pickerRef.Ref, nil
 }
 
+var pickerFlag = flag.String("picker", "", "Picker to simulate.")
+var weekFlag = flag.Int("week", -1, "Week to simulate (starting at 0 for preseason).")
+var maxItr = flag.Int("maxi", 1000000000, "Number of simulated annealing iterations.")
+var tC = flag.Float64("tc", 1., "Simulated annealing temperature constant: p = (tc * (maxi - i) / maxi)^te.")
+var tE = flag.Float64("te", 3., "Simulated annealing temperature exponent: p = (tc * (maxi - i) / maxi)^te.")
+var resetItr = flag.Int("reseti", 10000, "Maximum number of iterations to allow simulated annealing solution to wonder before resetting to best solution found so far.")
+var seed = flag.Int64("seed", -1, "Seed for RNG governing simulated annealing process. Negative values will use system clock to seed RNG.")
+var workers = flag.Int("workers", 1, "Number of workers per simulated picker. Increases odds of finding the global maximum.")
+
+func mockRequest(picker string, week *int) (*httptest.ResponseRecorder, *http.Request) {
+	rm := RequestMessage{Picker: picker, Week: week}
+	rmJson, err := json.Marshal(rm)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	psm := PubSubMessage{
+		Message: innerMessage{
+			Data: rmJson,
+			ID:   "example-id",
+		},
+		Subscription: "example-subscription",
+	}
+	psmJson, _ := json.Marshal(psm)
+	reqBody := bytes.NewReader((psmJson))
+
+	req := httptest.NewRequest("POST", "https://example.com/foo", reqBody)
+	w := httptest.NewRecorder()
+
+	return w, req
+}
+
 func main() {
 	log.Print("Beating the streak")
+
+	flag.Parse()
+
+	if *pickerFlag != "" {
+		log.Printf("Mocking HTTP request for picker %s week %d", *pickerFlag, *weekFlag)
+		w, req := mockRequest(*pickerFlag, weekFlag)
+		handler(w, req)
+
+		resp := w.Result()
+		body, _ := io.ReadAll(resp.Body)
+
+		if resp.StatusCode != 200 {
+			err := fmt.Errorf("status code %d: %s", resp.StatusCode, body)
+			log.Fatal(err)
+		}
+
+		return
+	}
 
 	http.HandleFunc("/", handler)
 
@@ -168,13 +223,16 @@ type RequestMessage struct {
 	Week   *int   `json:"week"` // pointer, as this is optional, but could be zero
 }
 
+// InnerMessage is the inner payload of a Pub/Sub event.
+type innerMessage struct {
+	Data []byte `json:"data,omitempty"`
+	ID   string `json:"id"`
+}
+
 // PubSubMessage is the payload of a Pub/Sub event.
 type PubSubMessage struct {
-	Message struct {
-		Data []byte `json:"data,omitempty"`
-		ID   string `json:"id"`
-	} `json:"message"`
-	Subscription string `json:"subscription"`
+	Message      innerMessage `json:"message"`
+	Subscription string       `json:"subscription"`
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -266,10 +324,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	iter.Stop()
-	log.Printf("latest prediction reacker discovered: %s", predictionDoc.Ref.ID)
+	log.Printf("latest prediction tracker discovered: %s", predictionDoc.Ref.ID)
 
 	// Get Sagarin Rating performance
-	iter = predictionDoc.Ref.Collection("model_performance").Where("system", "==", "Sagarin Ratings").Limit(1).Documents(ctx)
+	iter = predictionDoc.Ref.Collection("model_performance").Where("system", "==", "Sagarin Points").Limit(1).Documents(ctx)
 	sagDoc, err := iter.Next()
 	if check(w, err, http.StatusInternalServerError) {
 		return
@@ -422,8 +480,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	iter.Stop()
 	log.Printf("Picks loaded: %s", picksDoc.Ref.ID)
 
-	players := make(bts.PlayerMap)
 	// for fast lookups later
+	players := make(bts.PlayerMap)
+
 	iter = picksDoc.Ref.Collection("streaks").Where("picker", "==", pickerRef).Limit(1).Documents(ctx)
 	pickDoc, err := iter.Next()
 	if check(w, err, http.StatusInternalServerError) {
@@ -482,9 +541,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// Find the unique users.
 	// Legacy code!
 	duplicates := players.Duplicates()
-	log.Println("The following users are clones of one another:")
+	log.Println("The following users are unique clones of one another:")
 	for user, clones := range duplicates {
-		log.Printf("%s clones %v", user, clones)
+		if len(clones) == 0 {
+			log.Printf("%s is unique", user)
+		} else {
+			log.Printf("%s clones %v", user, clones)
+		}
 		for _, clone := range clones {
 			delete(players, clone)
 		}
@@ -556,20 +619,20 @@ func (sm *streakMap) update(player string, team bts.Team, spin streakProb) {
 	}
 }
 
-func (sm streakMap) getBest(player string) streakProb {
-	bestp := math.Inf(-1)
-	bests := math.Inf(-1)
-	bestt := bts.BYE
-	for pt, sp := range sm {
-		if pt.player != player {
-			continue
-		}
-		if sp.prob > bestp || (sp.prob == bestp && sp.spread > bests) {
-			bestt = pt.team
-		}
-	}
-	return sm[playerTeam{player: player, team: bestt}]
-}
+// func (sm streakMap) getBest(player string) streakProb {
+// 	bestp := math.Inf(-1)
+// 	bests := math.Inf(-1)
+// 	bestt := bts.BYE
+// 	for pt, sp := range sm {
+// 		if pt.player != player {
+// 			continue
+// 		}
+// 		if sp.prob > bestp || (sp.prob == bestp && sp.spread > bests) {
+// 			bestt = pt.team
+// 		}
+// 	}
+// 	return sm[playerTeam{player: player, team: bestt}]
+// }
 
 type playerTeamStreakProb struct {
 	player     *bts.Player
@@ -593,42 +656,104 @@ func playerIterator(pm bts.PlayerMap) <-chan *bts.Player {
 
 func perPlayerTeamStreaks(ps <-chan *bts.Player, predictions *bts.Predictions) <-chan playerTeamStreakProb {
 
-	out := make(chan playerTeamStreakProb)
+	out := make(chan playerTeamStreakProb, 100)
 
-	go func() {
+	go func(out chan<- playerTeamStreakProb) {
 		var wg sync.WaitGroup
-
+		sd := *seed
+		if sd < 0 {
+			sd = time.Now().UnixNano()
+		}
+		src := rand.NewSource(sd)
 		for p := range ps {
-			wg.Add(1)
-
-			go func(p *bts.Player) {
-				for weekOrder := range p.WeekTypeIterator() {
-					for teamOrder := range p.RemainingIterator() {
-						streak := bts.NewStreak(p.RemainingTeams(), weekOrder, teamOrder)
-						prob, spread := bts.SummarizeStreak(predictions, streak)
-						if prob <= 0 {
-							// Ignore streaks that guarantee a loss.
-							continue
-						}
-						for _, team := range streak.GetWeek(0) {
-							sp := streakProb{streak: streak, prob: prob, spread: spread}
-							out <- playerTeamStreakProb{player: p, team: team, streakProb: sp}
-						}
-					}
-				}
-				wg.Done()
-			}(p)
-
+			for i := 0; i < *workers; i++ {
+				wg.Add(1)
+				mySeed := src.Int63()
+				go func(p *bts.Player, out chan<- playerTeamStreakProb) {
+					anneal(mySeed, p, predictions, out)
+					wg.Done()
+				}(p, out)
+			}
 		}
 		wg.Wait()
 		close(out)
-	}()
+	}(out)
 
 	return out
 }
 
+func anneal(seed int64, p *bts.Player, predictions *bts.Predictions, out chan<- playerTeamStreakProb) {
+
+	src := rand.NewSource(seed)
+	rng := rand.New(src)
+
+	maxIterations := *maxItr
+	tConst := *tC
+	tExp := *tE
+	maxDrift := *resetItr
+	countSinceReset := maxDrift
+
+	s := bts.NewStreak(p.RemainingTeams(), <-p.WeekTypeIterator())
+	bestS := s.Clone()
+	resetS := s.Clone()
+	bestP := 0.
+	resetP := 0.
+	bestSpread := 0.
+	resetSpread := 0.
+
+	log.Printf("Player %s start: p=%f, s=%f, streak=%s", p.Name(), bestP, bestSpread, bestS)
+	for i := 0; i < maxIterations; i++ {
+		temperature := tConst * float64(maxIterations-i) / float64(maxIterations)
+		temperature = math.Pow(temperature, tExp)
+
+		s.Perturbate(src, true)
+		newP, newSpread := bts.SummarizeStreak(predictions, s)
+
+		// ignore impossible outcomes
+		if newP == 0 {
+			continue
+		}
+
+		if newP > bestP || (newP == bestP && newSpread > bestSpread) || (bestP-newP)*temperature > rng.Float64() {
+
+			// if newP <= bestP {
+			// 	log.Printf("Player %s accepted worse outcome due to temperature", p.Name())
+			// }
+
+			bestP = newP
+			bestSpread = newSpread
+			bestS = s.Clone()
+
+			if bestP > resetP {
+				resetP = bestP
+				resetSpread = bestSpread
+				resetS = bestS.Clone()
+				countSinceReset = maxDrift
+
+				for _, team := range resetS.GetWeek(0) {
+					sp := streakProb{streak: resetS.Clone(), prob: resetP, spread: resetSpread}
+					out <- playerTeamStreakProb{player: p, team: team, streakProb: sp}
+				}
+
+				log.Printf("Player %s itr %d (temp %f): p=%f, s=%f, streak=%s", p.Name(), i, temperature, bestP, bestSpread, bestS)
+			}
+
+		} else if countSinceReset < 0 {
+			countSinceReset = maxDrift
+			bestP = resetP
+			bestSpread = resetSpread
+			// bestS = resetS.Clone()
+			s = resetS.Clone()
+
+			// log.Printf("Player %s reset at itr %d to p=%f, s=%f, streak=%s", p.Name(), i, bestP, bestSpread, bestS)
+		}
+
+		countSinceReset--
+	}
+}
+
 func calculateBestStreaks(ppts <-chan playerTeamStreakProb) <-chan streakMap {
-	out := make(chan streakMap)
+	out := make(chan streakMap, 100)
 
 	sm := make(streakMap)
 	go func() {
@@ -680,12 +805,7 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 			}
 
 			so := StreakPrediction{CumulativeProbability: prob, CumulativeSpread: spread, Weeks: weeks}
-			if sos, ok := soByPlayer[pt.player]; ok {
-				soByPlayer[pt.player] = append(sos, so)
-			} else {
-				soByPlayer[pt.player] = []StreakPrediction{so}
-			}
-
+			soByPlayer[pt.player] = append(soByPlayer[pt.player], so)
 		}
 
 	}
@@ -728,15 +848,15 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 	return prs
 }
 
-func determineWeekNumber(players bts.PlayerMap, schedule *bts.Schedule) int {
-	guess := -1
-	for name, player := range players {
-		thisGuess := player.RemainingWeeks()
-		if guess >= 0 && thisGuess != guess {
-			panic(fmt.Errorf("player %s has an invalid number of weeks remaining: expected %d, found %d", name, thisGuess, guess))
-		}
-		guess = thisGuess
-	}
-	week := schedule.NumWeeks() - guess
-	return week
-}
+// func determineWeekNumber(players bts.PlayerMap, schedule *bts.Schedule) int {
+// 	guess := -1
+// 	for name, player := range players {
+// 		thisGuess := player.RemainingWeeks()
+// 		if guess >= 0 && thisGuess != guess {
+// 			panic(fmt.Errorf("player %s has an invalid number of weeks remaining: expected %d, found %d", name, thisGuess, guess))
+// 		}
+// 		guess = thisGuess
+// 	}
+// 	week := schedule.NumWeeks() - guess
+// 	return week
+// }

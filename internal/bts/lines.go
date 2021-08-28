@@ -32,7 +32,7 @@ func MakeLines(url string) (LineMap, error) {
 	if err != nil {
 		return nil, err
 	}
-	models := header[2:len(header)]
+	models := header[2:]
 
 	record, err := reader.Read()
 	for ; record != nil; record, err = reader.Read() {
@@ -45,7 +45,7 @@ func MakeLines(url string) (LineMap, error) {
 
 		game := NewGame(Team{Name4: record[0]}, Team{Name4: record[1]}, Neutral)
 
-		for i, line := range record[2:len(record)] {
+		for i, line := range record[2:] {
 			model := models[i]
 			gm := GameModel{Game: game, Model: model}
 

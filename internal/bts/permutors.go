@@ -91,7 +91,7 @@ func clone(x []int) []int {
 // The implementation uses Heap's algorithm (non-recursive) and a map of hashes to keep track of which permutations have been seen already.
 // This means for very large permutations, there is some small probability that a hash collision will occur and certain permutations could be skipped in the iteration.
 func (ip *IdenticalPermutor) Iterator() <-chan []int {
-	ch := make(chan []int)
+	ch := make(chan []int, 20)
 
 	go func() {
 		visited := make(map[uint64]bool)
@@ -135,7 +135,7 @@ func (ip *IdenticalPermutor) Iterator() <-chan []int {
 // The channel closes once all the permutations have been pushed.
 // The implementation uses Heap's algorithm (non-recursive).
 func (ip *IndexPermutor) Iterator() <-chan []int {
-	ch := make(chan []int)
+	ch := make(chan []int, 20)
 
 	go func() {
 		out := make([]int, ip.Len())

@@ -233,6 +233,7 @@ func main() {
 		if err != nil {
 			return err
 		}
+		log.Printf("picks %s made", picksRef.ID)
 
 		for pickerRef, remRefs := range parsedRemaining {
 			remDoc := streaksColRef.NewDoc()
@@ -245,6 +246,7 @@ func main() {
 				Remaining:          remRefs,
 				PickTypesRemaining: typesRem,
 			}
+			log.Printf("making picker %v", s)
 			err := tx.Create(remDoc, &s)
 			if err != nil {
 				return err
@@ -257,4 +259,6 @@ func main() {
 		log.Fatalln(err)
 		os.Exit(4)
 	}
+
+	log.Printf("DONE")
 }
