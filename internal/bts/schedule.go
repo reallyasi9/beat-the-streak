@@ -87,15 +87,15 @@ func splitLocTeam(locTeam string) (RelativeLocation, Team) {
 	// Note: this is relative to the schedule team, not the team given here.
 	switch locTeam[0] {
 	case '@':
-		return Away, Team{Name4: locTeam[1:]}
+		return Away, Team(locTeam[1:])
 	case '>':
-		return Far, Team{Name4: locTeam[1:]}
+		return Far, Team(locTeam[1:])
 	case '<':
-		return Near, Team{Name4: locTeam[1:]}
+		return Near, Team(locTeam[1:])
 	case '!':
-		return Neutral, Team{Name4: locTeam[1:]}
+		return Neutral, Team(locTeam[1:])
 	default:
-		return Home, Team{Name4: locTeam}
+		return Home, Team(locTeam)
 	}
 }
 
@@ -111,7 +111,7 @@ func (s Schedule) String() string {
 	b.WriteString("\n")
 
 	for _, team := range tl {
-		b.WriteString(fmt.Sprintf("%4s: ", team.Name()))
+		b.WriteString(fmt.Sprintf("%4s: ", team))
 		for week := 0; week < nW; week++ {
 			g := s.Get(team, week)
 			extra := ' '
@@ -130,7 +130,7 @@ func (s Schedule) String() string {
 			} else {
 				b.WriteRune(' ')
 			}
-			b.WriteString(fmt.Sprintf("%-4s ", g.Team(1).Name()))
+			b.WriteString(fmt.Sprintf("%-4s ", g.Team(1)))
 		}
 		b.WriteString("\n")
 	}

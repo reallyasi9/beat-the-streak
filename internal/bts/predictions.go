@@ -112,17 +112,18 @@ func MakePredictions(s *Schedule, m PredictionModel) *Predictions {
 }
 
 func (p Predictions) String() string {
-	keys := make([]string, len(p.probs))
+	keys := make(TeamList, len(p.probs))
 	i := 0
 	for k := range p.probs {
-		keys[i] = k.Name()
+		keys[i] = k
 		i++
 	}
-	sort.Strings(keys)
+	sort.Sort(keys)
 
 	nWeeks := 0
-	if len(keys) > 0 {
-		nWeeks = len(p.probs[Team{Name4: keys[0]}])
+	for _, q := range p.probs {
+		nWeeks = len(q)
+		break
 	}
 
 	var buffer strings.Builder
@@ -133,10 +134,9 @@ func (p Predictions) String() string {
 	}
 	buffer.WriteString("\n")
 	for _, k := range keys {
-		key := Team{Name4: k}
-		buffer.WriteString(fmt.Sprintf("%-4s ", key.Name()))
-		for w, v := range p.probs[Team{Name4: k}] {
-			buffer.WriteString(fmt.Sprintf(" %5.3f(%+6.2f) ", v, p.spreads[Team{Name4: k}][w]))
+		buffer.WriteString(fmt.Sprintf("%-4s ", k))
+		for w, v := range p.probs[k] {
+			buffer.WriteString(fmt.Sprintf(" %5.3f(%+6.2f) ", v, p.spreads[k][w]))
 		}
 		buffer.WriteString("\n")
 	}

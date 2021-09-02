@@ -136,7 +136,7 @@ func (pm PlayerMap) Duplicates() map[string][]string {
 		hash := jody.HashString64("")
 		sort.Sort(TeamList(player.remaining))
 		for _, team := range player.remaining {
-			hash = jody.AddString64(hash, string(team.Name()))
+			hash = jody.AddString64(hash, string(team))
 		}
 		for _, weektype := range player.weekTypes.sets {
 			hash = jody.AddUint64(hash, uint64(weektype))

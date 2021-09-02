@@ -1,23 +1,16 @@
 package bts
 
 // Team play game against Team.
-type Team struct {
-	Name4 string `firestore:"name_4"`
-}
+type Team string
 
 // TeamList implements the sort.Interface interface and represents a list of Teams.
 type TeamList []Team
 
 // BYE represents a bye week for a team in a schedule.
-var BYE = Team{Name4: "BYE"}
+const BYE = Team("BYE")
 
 // NONE represents a null pick--used when a player uses a pick bye on a week.
-var NONE = Team{Name4: "----"}
-
-// Name gets the team name
-func (t Team) Name() string {
-	return t.Name4
-}
+const NONE = Team("----")
 
 // Len calculates the length of the TeamList (implements sort.Interface interface)
 func (t TeamList) Len() int {
@@ -26,7 +19,7 @@ func (t TeamList) Len() int {
 
 // Less reports whether (implements sort.Interface interface)
 func (t TeamList) Less(i, j int) bool {
-	return t[i].Name() < t[j].Name()
+	return t[i] < t[j]
 }
 
 // Swap swaps the elements with indexes i and j (implements sort.Interface interface)
@@ -40,13 +33,3 @@ func (t TeamList) Clone() TeamList {
 	copy(out, t)
 	return out
 }
-
-// Validate a TeamList against a given Probabilities map.
-// func (t TeamList) validate(p Predictions) error {
-// 	for _, team := range t {
-// 		if _, ok := p.probs[team]; !ok {
-// 			return fmt.Errorf("team '%s' not in predictions", team)
-// 		}
-// 	}
-// 	return nil
-// }

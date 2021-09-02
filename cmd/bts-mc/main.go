@@ -122,7 +122,7 @@ type PickerPrediction struct {
 	CalculationEndTime time.Time `firestore:"calculation_end_time"`
 }
 
-var teamRefLookup = make(map[string]*firestore.DocumentRef)
+var teamRefLookup = make(map[bts.Team]*firestore.DocumentRef)
 
 func makeTeamLookup(ctx context.Context, fs *firestore.Client) error {
 	teamIter := fs.Collection("teams").Documents(ctx)
@@ -141,7 +141,7 @@ func makeTeamLookup(ctx context.Context, fs *firestore.Client) error {
 			return err
 		}
 
-		teamRefLookup[team4.(string)] = teamDoc.Ref
+		teamRefLookup[bts.Team(team4.(string))] = teamDoc.Ref
 	}
 	return nil
 }
@@ -797,7 +797,7 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 					pickedSpreads = append(pickedSpreads, spread)
 
 					// opponent := schedule.Get(team, iweek).Team(1)
-					pickedTeams = append(pickedTeams, teamRefLookup[team.Name()])
+					pickedTeams = append(pickedTeams, teamRefLookup[team])
 				}
 
 				weeks[iweek] = Week{WeekNumber: seasonWeek, Pick: pickedTeams, Probabilities: pickedProbs, Spreads: pickedSpreads}

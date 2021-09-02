@@ -6,7 +6,7 @@ import (
 )
 
 func TestNewStreak(t *testing.T) {
-	rem := Remaining{Team{"A"}, Team{"B"}, Team{"C"}, Team{"D"}}
+	rem := Remaining{Team("A"), Team("B"), Team("C"), Team("D")}
 	ppw := []int{0, 2, 0, 1, 1}
 	s := NewStreak(rem, ppw)
 
@@ -31,7 +31,7 @@ func TestStreak_Perturbate(t *testing.T) {
 			"two teams one pick per week",
 			fields{
 				numberOfPicks: []int{1, 1},
-				teamOrder:     TeamList{Team{"A"}, Team{"B"}},
+				teamOrder:     TeamList{Team("A"), Team("B")},
 			},
 			args{
 				src:              rand.NewSource(4),
@@ -42,7 +42,7 @@ func TestStreak_Perturbate(t *testing.T) {
 			"three teams one bye one dd",
 			fields{
 				numberOfPicks: []int{1, 0, 2},
-				teamOrder:     TeamList{Team{"A"}, Team{"B"}, Team{"C"}},
+				teamOrder:     TeamList{Team("A"), Team("B"), Team("C")},
 			},
 			args{
 				src:              rand.NewSource(5),
@@ -53,7 +53,7 @@ func TestStreak_Perturbate(t *testing.T) {
 			"three teams one bye one dd also ppw",
 			fields{
 				numberOfPicks: []int{1, 0, 2},
-				teamOrder:     TeamList{Team{"A"}, Team{"B"}, Team{"C"}},
+				teamOrder:     TeamList{Team("A"), Team("B"), Team("C")},
 			},
 			args{
 				src:              rand.NewSource(40),
@@ -78,20 +78,20 @@ func BenchmarkStreak_Perturbation(b *testing.B) {
 	src := rand.NewSource(0)
 	numberOfPicks := []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 0}
 	teams := Remaining{
-		Team{"A"},
-		Team{"B"},
-		Team{"C"},
-		Team{"D"},
-		Team{"E"},
-		Team{"F"},
-		Team{"G"},
-		Team{"H"},
-		Team{"I"},
-		Team{"J"},
-		Team{"K"},
-		Team{"L"},
-		Team{"M"},
-		Team{"N"},
+		Team("A"),
+		Team("B"),
+		Team("C"),
+		Team("D"),
+		Team("E"),
+		Team("F"),
+		Team("G"),
+		Team("H"),
+		Team("I"),
+		Team("J"),
+		Team("K"),
+		Team("L"),
+		Team("M"),
+		Team("N"),
 	}
 	s := NewStreak(teams, numberOfPicks)
 	b.ResetTimer()

@@ -98,16 +98,16 @@ func (s *Streak) NumWeeks() int {
 func (s *Streak) String() string {
 	pick := 0
 
-	pickMap := make([][]string, s.NumWeeks())
+	pickMap := make([]TeamList, s.NumWeeks())
 
 	for week, ppw := range s.numberOfPicks {
 		if ppw == 0 {
-			pickMap[week] = []string{NONE.Name()}
+			pickMap[week] = TeamList{NONE}
 			continue
 		}
-		picks := make([]string, ppw)
+		picks := make(TeamList, ppw)
 		for i := 0; i < ppw; i++ {
-			picks[i] = s.teamOrder[pick].Name()
+			picks[i] = s.teamOrder[pick]
 			pick++
 		}
 		pickMap[week] = picks
