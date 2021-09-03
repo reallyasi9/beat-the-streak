@@ -22,6 +22,8 @@ import (
 	firebase "firebase.google.com/go"
 	"github.com/reallyasi9/beat-the-streak/internal/bts"
 	"google.golang.org/api/iterator"
+
+	bpefs "github.com/reallyasi9/b1gpickem/firestore"
 )
 
 func check(w http.ResponseWriter, err error, code int) bool {
@@ -31,32 +33,6 @@ func check(w http.ResponseWriter, err error, code int) bool {
 		return true
 	}
 	return false
-}
-
-// ModelPerformance holds Firestore data for model performance, parsed from ThePredictionTracker.com
-type ModelPerformance struct {
-	HomeBias          float64                `firestore:"bias"`
-	StandardDeviation float64                `firestore:"std_dev"`
-	Model             *firestore.DocumentRef `firestore:"model"`
-}
-
-// SagarinScrapeResult stores the home advantages from a scraping of Sagarin.
-type SagarinScrapeResult struct {
-	HomeAdvantage float64   `firestore:"home_advantage_rating"`
-	Timestamp     time.Time `firestore:"timestamp"`
-}
-
-// SagarinRating is a rating.  From Sagarin.  Stored in Firestore.  Simple.
-type SagarinRating struct {
-	Rating float64                `firestore:"rating"`
-	Team   *firestore.DocumentRef `firestore:"team"`
-}
-
-// TeamSchedule is a team's schedule in Firestore format
-type TeamSchedule struct {
-	Team              *firestore.DocumentRef   `firestore:"team"`
-	RelativeLocations []bts.RelativeLocation   `firestore:"locales"`
-	Opponents         []*firestore.DocumentRef `firestore:"opponents"`
 }
 
 // PickerStreak is a picker's latest streak status, stored in the firestore database.
@@ -335,7 +311,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	iter.Stop()
 	log.Printf("sagarin model performances discovered: %s", sagDoc.Ref.ID)
 
-	var sagPerf ModelPerformance
+	var sagPerf bpefs.ModelPerformance
 	err = sagDoc.DataTo(&sagPerf)
 	if check(w, err, http.StatusInternalServerError) {
 		return
@@ -362,7 +338,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var sr SagarinRating
+		var sr bpefs.SagarinRating
 		err = teamRatingDoc.DataTo(&sr)
 		if check(w, err, http.StatusInternalServerError) {
 			return
@@ -382,14 +358,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	teams := make([]bts.Team, len(teamDocs))
 	for i, td := range teamDocs {
-		var team bts.Team
+		var team bpefs.Team
 		err := td.DataTo(&team)
 		if check(w, err, http.StatusInternalServerError) {
 			return
 		}
 
 		// log.Printf("team %v", team)
-		teams[i] = team
+		teams[i] = bts.Team(team.Name4)
 	}
 
 	// Build the probability model
@@ -397,9 +373,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	for i, t := range teams {
 		ratingsMap[t] = ratings[i]
 	}
-	homeBias := sagPerf.HomeBias + homeAdvantage.(float64)
+	homeBias := sagPerf.Bias + homeAdvantage.(float64)
 	closeBias := homeBias / 2.
-	model := bts.NewGaussianSpreadModel(ratingsMap, sagPerf.StandardDeviation, homeBias, closeBias)
+	model := bts.NewGaussianSpreadModel(ratingsMap, sagPerf.StdDev, homeBias, closeBias)
 
 	log.Printf("Built model %v", model)
 
@@ -427,7 +403,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var ts TeamSchedule
+		var ts bpefs.Schedule
 		err = teamSchedule.DataTo(&ts)
 		if check(w, err, http.StatusInternalServerError) {
 			return
@@ -443,23 +419,25 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var team bts.Team
+		var team bpefs.Team
 		err = teamDoc.DataTo(&team)
 		if check(w, err, http.StatusInternalServerError) {
 			return
 		}
 
-		schedule[team] = make([]*bts.Game, len(opponentDocs))
+		t := bts.Team(team.Name4)
+		schedule[t] = make([]*bts.Game, len(opponentDocs))
 		for i, opponent := range opponentDocs {
-			var op bts.Team
+			var op bpefs.Team
 			err = opponent.DataTo(&op)
 			if check(w, err, http.StatusInternalServerError) {
 				return
 			}
 
-			game := bts.NewGame(team, op, ts.RelativeLocations[i])
+			o := bts.Team(op.Name4)
+			game := bts.NewGame(t, o, bts.RelativeLocation(ts.RelativeLocations[i]))
 			//log.Printf("game loaded %v", game)
-			schedule[team][i] = game
+			schedule[t][i] = game
 
 		}
 	}
@@ -515,13 +493,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	remainingTeams := make(bts.Remaining, len(remainingTeamDocs))
 	for i, teamDoc := range remainingTeamDocs {
-		var team bts.Team
+		var team bpefs.Team
 		err = teamDoc.DataTo(&team)
 		if check(w, err, http.StatusInternalServerError) {
 			return
 		}
 
-		remainingTeams[i] = team
+		remainingTeams[i] = bts.Team(team.Name4)
 	}
 
 	players[p.Name], err = bts.NewPlayer(p.Name, remainingTeams, ps.PickTypes)
