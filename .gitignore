@@ -12,3 +12,11 @@
 
 # Project-local glide cache, RE: https://github.com/Masterminds/glide/issues/736
 .glide/
+
+.vscode
+
+*.yaml
+cmd/bts-mc/bts-mc*
+cmd/streaker/streaker*
+cmd/scheduler/scheduler*
+cmd/pyp-mc/pyp-mc*
