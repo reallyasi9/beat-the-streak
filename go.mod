@@ -9,10 +9,9 @@ require (
 	firebase.google.com/go v3.13.0+incompatible
 	github.com/atgjack/prob v0.0.0-20161220081030-6cfd5d401186
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
-	github.com/reallyasi9/b1gpickem v0.0.8
+	github.com/reallyasi9/b1gpickem v0.0.9
 	github.com/segmentio/fasthash v1.0.3
 	golang.org/x/net v0.0.0-20210805182204-aaa1db679c0d // indirect
-	golang.org/x/oauth2 v0.0.0-20210810183815-faf39c7919d5 // indirect
 	golang.org/x/sys v0.0.0-20210809222454-d867a43fc93e // indirect
 	golang.org/x/text v0.3.7 // indirect
 	google.golang.org/api v0.54.0
@@ -28,6 +27,7 @@ require (
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect
 	golang.org/x/mod v0.4.2 // indirect
+	golang.org/x/oauth2 v0.0.0-20210810183815-faf39c7919d5 // indirect
 	golang.org/x/tools v0.1.5 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
