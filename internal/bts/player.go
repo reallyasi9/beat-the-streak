@@ -2,19 +2,24 @@ package bts
 
 import (
 	"fmt"
-	"io/ioutil"
 	"sort"
 
+	"cloud.google.com/go/firestore"
 	"github.com/segmentio/fasthash/jody"
-
-	yaml "gopkg.in/yaml.v2"
 )
 
 // Player represents a player's current status in the competition.
 type Player struct {
-	name      string
-	remaining Remaining
-	weekTypes *IdenticalPermutor
+	ref           *firestore.DocumentRef
+	name          string
+	remaining     Remaining
+	remainingRefs []*firestore.DocumentRef
+	weekTypes     *IdenticalPermutor
+}
+
+// Ref returns a reference to the player document in Firestore.
+func (p Player) Ref() *firestore.DocumentRef {
+	return p.ref
 }
 
 // Name returns the player's name
@@ -25,6 +30,11 @@ func (p Player) Name() string {
 // RemainingTeams returns the list of remaining teams.
 func (p Player) RemainingTeams() Remaining {
 	return p.remaining
+}
+
+// RemainingTeamsRefs returns the list of remaining teams as references to Firestore documents.
+func (p Player) RemainingTeamsRefs() []*firestore.DocumentRef {
+	return p.remainingRefs
 }
 
 // RemainingWeekTypes returns the list of remaining week types.
@@ -64,7 +74,7 @@ type WeeksMap map[string][]int
 type PlayerMap map[string]*Player
 
 // NewPlayer builds a new player
-func NewPlayer(name string, remaining Remaining, weekTypesRemaining []int) (*Player, error) {
+func NewPlayer(name string, ref *firestore.DocumentRef, remaining Remaining, remainingRefs []*firestore.DocumentRef, weekTypesRemaining []int) (*Player, error) {
 	nTeams := len(remaining)
 	nPicks := 0
 	for itype, ntype := range weekTypesRemaining {
@@ -74,59 +84,61 @@ func NewPlayer(name string, remaining Remaining, weekTypesRemaining []int) (*Pla
 		return nil, fmt.Errorf("number of teams remaining (%d) must equal number of picks remaining (%d)", nTeams, nPicks)
 	}
 	return &Player{
-		name:      name,
-		remaining: remaining,
-		weekTypes: NewIdenticalPermutor(weekTypesRemaining...),
+		ref:           ref,
+		name:          name,
+		remaining:     remaining,
+		remainingRefs: remainingRefs,
+		weekTypes:     NewIdenticalPermutor(weekTypesRemaining...),
 	}, nil
 }
 
-// MakePlayers parses a YAML file and produces a map of remaining players.
-func MakePlayers(playerFile string, weekTypeFile string) (PlayerMap, error) {
-	playerYaml, err := ioutil.ReadFile(playerFile)
-	if err != nil {
-		return nil, err
-	}
+// // MakePlayers parses a YAML file and produces a map of remaining players.
+// func MakePlayers(playerFile string, weekTypeFile string) (PlayerMap, error) {
+// 	playerYaml, err := ioutil.ReadFile(playerFile)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	rm := make(RemainingMap)
-	err = yaml.Unmarshal(playerYaml, rm)
-	if err != nil {
-		return nil, err
-	}
+// 	rm := make(RemainingMap)
+// 	err = yaml.Unmarshal(playerYaml, rm)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	// Figure out week types if necessary
-	wm := make(WeeksMap)
-	if weekTypeFile == "" {
-		nRemaining := -1
-		for name, remaining := range rm {
-			if nRemaining > 0 && len(remaining) != nRemaining {
-				return nil, fmt.Errorf("number of remaining teams inconsistent: must specify a weeks-remaining file")
-			}
-			nRemaining = len(remaining)
-			wm[name] = []int{0, nRemaining}
-		}
-	} else {
-		weeksYaml, err := ioutil.ReadFile(weekTypeFile)
-		if err != nil {
-			return nil, err
-		}
+// 	// Figure out week types if necessary
+// 	wm := make(WeeksMap)
+// 	if weekTypeFile == "" {
+// 		nRemaining := -1
+// 		for name, remaining := range rm {
+// 			if nRemaining > 0 && len(remaining) != nRemaining {
+// 				return nil, fmt.Errorf("number of remaining teams inconsistent: must specify a weeks-remaining file")
+// 			}
+// 			nRemaining = len(remaining)
+// 			wm[name] = []int{0, nRemaining}
+// 		}
+// 	} else {
+// 		weeksYaml, err := ioutil.ReadFile(weekTypeFile)
+// 		if err != nil {
+// 			return nil, err
+// 		}
 
-		err = yaml.Unmarshal(weeksYaml, wm)
-		if err != nil {
-			return nil, err
-		}
-	}
+// 		err = yaml.Unmarshal(weeksYaml, wm)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 	}
 
-	pm := make(PlayerMap)
-	for p, r := range rm {
-		var err error
-		pm[p], err = NewPlayer(p, r, wm[p])
-		if err != nil {
-			return nil, err
-		}
-	}
+// 	pm := make(PlayerMap)
+// 	for p, r := range rm {
+// 		var err error
+// 		pm[p], err = NewPlayer(p, r, wm[p])
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 	}
 
-	return pm, nil
-}
+// 	return pm, nil
+// }
 
 // Duplicates returns a list of Players who are duplicates of one another.
 func (pm PlayerMap) Duplicates() map[string][]string {

@@ -8,8 +8,8 @@ import (
 
 func TestHandler(t *testing.T) {
 	week := 0
-	picker := "Phil K"
-	w, req := mockRequest(picker, &week)
+	pickers := []string{"Phil K"}
+	w, req := mockRequest(pickers, &week)
 
 	handler(w, req)
 

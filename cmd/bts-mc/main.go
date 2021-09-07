@@ -76,25 +76,43 @@ func makeTeamLookup(ctx context.Context, fs *firestore.Client) error {
 	return nil
 }
 
-func pickerRefLookup(ctx context.Context, fs *firestore.Client, name string) (*firestore.DocumentRef, error) {
-	pickerRef, err := fs.Collection("pickers").Where("name_luke", "==", name).Limit(1).Documents(ctx).Next()
-	if err != nil {
-		return nil, err
+func pickerRefsLookup(ctx context.Context, fs *firestore.Client, names []string) ([]*firestore.DocumentRef, error) {
+	pickers := make([]*firestore.DocumentRef, len(names))
+	for i, name := range names {
+		pickerRef, err := fs.Collection("pickers").Where("name_luke", "==", name).Limit(1).Documents(ctx).Next()
+		if err != nil {
+			return nil, err
+		}
+		pickers[i] = pickerRef.Ref
 	}
-	return pickerRef.Ref, nil
+	return pickers, nil
 }
 
-var pickerFlag = flag.String("picker", "", "Picker to simulate.")
-var weekFlag = flag.Int("week", -1, "Week to simulate (starting at 0 for preseason).")
-var maxItr = flag.Int("maxi", 1000000000, "Number of simulated annealing iterations.")
+var weekFlag = flag.Int("week", -1, "Week number. Negative values will calculate week number based on today's date.")
+var maxItr = flag.Int("maxi", 1000000000, "Number of simulated annealing iterations per picker.")
 var tC = flag.Float64("tc", 1., "Simulated annealing temperature constant: p = (tc * (maxi - i) / maxi)^te.")
 var tE = flag.Float64("te", 3., "Simulated annealing temperature exponent: p = (tc * (maxi - i) / maxi)^te.")
 var resetItr = flag.Int("reseti", 10000, "Maximum number of iterations to allow simulated annealing solution to wonder before resetting to best solution found so far.")
 var seed = flag.Int64("seed", -1, "Seed for RNG governing simulated annealing process. Negative values will use system clock to seed RNG.")
 var workers = flag.Int("workers", 1, "Number of workers per simulated picker. Increases odds of finding the global maximum.")
 
-func mockRequest(picker string, week *int) (*httptest.ResponseRecorder, *http.Request) {
-	rm := RequestMessage{Picker: picker, Week: week}
+func usage() {
+	w := flag.CommandLine.Output()
+	fmt.Fprint(w, `bts-mc [flags] [Picker [Picker ...]]
+
+Parse a B1G Pick 'Em slate.
+
+Arguments:
+  [[Picker] [Picker ...]]
+	Luke-given name of picker to simulate. Can list multiple pickers. Omitting this argument will start a PubSub listener on port ENV["PORT"].
+
+Flags:
+`)
+	flag.PrintDefaults()
+}
+
+func mockRequest(pickers []string, week *int) (*httptest.ResponseRecorder, *http.Request) {
+	rm := RequestMessage{Pickers: pickers, Week: week}
 	rmJson, err := json.Marshal(rm)
 	if err != nil {
 		log.Fatal(err)
@@ -117,13 +135,16 @@ func mockRequest(picker string, week *int) (*httptest.ResponseRecorder, *http.Re
 }
 
 func main() {
-	log.Print("Beating the streak")
-
+	flag.Usage = usage
 	flag.Parse()
 
-	if *pickerFlag != "" {
-		log.Printf("Mocking HTTP request for picker %s week %d", *pickerFlag, *weekFlag)
-		w, req := mockRequest(*pickerFlag, weekFlag)
+	log.Print("Beating the streak")
+
+	pickers := flag.Args()
+
+	if len(pickers) != 0 {
+		log.Printf("Mocking HTTP request for pickers %v week %d", pickers, *weekFlag)
+		w, req := mockRequest(pickers, weekFlag)
 		handler(w, req)
 
 		resp := w.Result()
@@ -149,8 +170,10 @@ func main() {
 
 // RequestMessage is inside a PubSubMessage
 type RequestMessage struct {
-	Picker string `json:"picker"`
-	Week   *int   `json:"week"` // pointer, as this is optional, but could be zero
+	// Pickers are the pickers to simulate. An empty slice means simulate all the active pickers.
+	Pickers []string `json:"pickers"`
+
+	Week *int `json:"week"` // pointer, as this is optional, but could be zero
 }
 
 // InnerMessage is the inner payload of a Pub/Sub event.
@@ -184,9 +207,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Beating the streak, picker %s", rm.Picker)
+	log.Printf("Beating the streak, pickers %s", rm.Pickers)
 	weekNumber := rm.Week
-	pickerName := rm.Picker
+	pickerNames := rm.Pickers
 
 	conf := &firebase.Config{}
 	app, err := firebase.NewApp(ctx, conf)
@@ -241,11 +264,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get this user
-	pickerRef, err := pickerRefLookup(ctx, fs, pickerName)
+	pickerRefs, err := pickerRefsLookup(ctx, fs, pickerNames)
 	if check(w, err, http.StatusInternalServerError) {
 		return
 	}
-	log.Printf("picker loaded: %s", pickerRef.ID)
+	log.Printf("pickers loaded: %+v", pickerRefs)
 
 	// Get most recent predictions
 	iter = fs.Collection("prediction_tracker").OrderBy("timestamp", firestore.Desc).Limit(1).Documents(ctx)
@@ -415,50 +438,52 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// for fast lookups later
 	players := make(bts.PlayerMap)
 
-	iter = picksDoc.Ref.Collection("streaks").Where("picker", "==", pickerRef).Limit(1).Documents(ctx)
-	pickDoc, err := iter.Next()
-	if check(w, err, http.StatusInternalServerError) {
-		return
-	}
-	iter.Stop()
-	log.Printf("Streak loaded: %s", pickDoc.Ref.ID)
+	for _, pickerRef := range pickerRefs {
+		iter = picksDoc.Ref.Collection("streaks").Where("picker", "==", pickerRef).Limit(1).Documents(ctx)
+		pickDoc, err := iter.Next()
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
+		iter.Stop()
+		log.Printf("Streak loaded: %s", pickDoc.Ref.ID)
 
-	var ps bpefs.StreakPredictions
-	err = pickDoc.DataTo(&ps)
-	if check(w, err, http.StatusInternalServerError) {
-		return
-	}
-
-	pickerDoc, err := ps.Picker.Get(ctx)
-	if check(w, err, http.StatusInternalServerError) {
-		return
-	}
-
-	var p Picker
-	err = pickerDoc.DataTo(&p)
-	if check(w, err, http.StatusInternalServerError) {
-		return
-	}
-
-	remainingTeamDocs, err := fs.GetAll(ctx, ps.TeamsRemaining)
-	if check(w, err, http.StatusInternalServerError) {
-		return
-	}
-
-	remainingTeams := make(bts.Remaining, len(remainingTeamDocs))
-	for i, teamDoc := range remainingTeamDocs {
-		var team bpefs.Team
-		err = teamDoc.DataTo(&team)
+		var ps bpefs.StreakPredictions
+		err = pickDoc.DataTo(&ps)
 		if check(w, err, http.StatusInternalServerError) {
 			return
 		}
 
-		remainingTeams[i] = bts.Team(team.Name4)
-	}
+		pickerDoc, err := ps.Picker.Get(ctx)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
 
-	players[p.Name], err = bts.NewPlayer(p.Name, remainingTeams, ps.PickTypesRemaining)
-	if check(w, err, http.StatusInternalServerError) {
-		return
+		var p Picker
+		err = pickerDoc.DataTo(&p)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
+
+		remainingTeamDocs, err := fs.GetAll(ctx, ps.TeamsRemaining)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
+
+		remainingTeams := make(bts.Remaining, len(remainingTeamDocs))
+		for i, teamDoc := range remainingTeamDocs {
+			var team bpefs.Team
+			err = teamDoc.DataTo(&team)
+			if check(w, err, http.StatusInternalServerError) {
+				return
+			}
+
+			remainingTeams[i] = bts.Team(team.Name4)
+		}
+
+		players[p.Name], err = bts.NewPlayer(p.Name, ps.Picker, remainingTeams, ps.TeamsRemaining, ps.PickTypesRemaining)
+		if check(w, err, http.StatusInternalServerError) {
+			return
+		}
 	}
 
 	log.Printf("Pickers loaded:\n%v", players)
@@ -473,7 +498,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// Find the unique users.
 	// Legacy code!
 	duplicates := players.Duplicates()
-	log.Println("The following users are unique clones of one another:")
+	log.Println("The following pickers are unique clones of one another:")
 	for user, clones := range duplicates {
 		if len(clones) == 0 {
 			log.Printf("%s is unique", user)
@@ -503,9 +528,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	output := fs.Collection("streak_predictions")
 	// Note: only one picker for now!
 	for _, streak := range streakOptions {
-		streak.Picker = ps.Picker
-		streak.TeamsRemaining = ps.TeamsRemaining
-		streak.PickTypesRemaining = ps.PickTypesRemaining
 		streak.Schedule = scheduleDoc.Ref
 		streak.Sagarin = sagRateDoc.Ref
 		streak.Season = seasonDoc.Ref
@@ -758,6 +780,7 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 		bestSpread := streakOptions[0].CumulativeSpread
 
 		prs[picker] = bpefs.StreakPredictions{
+			Picker: players[picker].Ref(),
 			// Picker            *firestore.DocumentRef `firestore:"picker"`
 			// Season            *firestore.DocumentRef `firestore:"season"`
 			Week: weekNumber,
@@ -765,8 +788,8 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 			// Sagarin           *firestore.DocumentRef `firestore:"sagarin"`
 			// PredictionTracker *firestore.DocumentRef `firestore:"prediction_tracker"`
 
-			// Remaining []*firestore.DocumentRef `firestore:"remaining"`
-			// PickTypes []int                    `firestore:"pick_types_remaining"`
+			TeamsRemaining:     players[picker].RemainingTeamsRefs(),
+			PickTypesRemaining: players[picker].RemainingWeekTypes(),
 
 			BestPick:             bestSelection,
 			Probability:          bestProb,
