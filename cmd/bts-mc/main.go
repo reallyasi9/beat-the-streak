@@ -76,14 +76,25 @@ func makeTeamLookup(ctx context.Context, fs *firestore.Client) error {
 	return nil
 }
 
-func pickerRefsLookup(ctx context.Context, fs *firestore.Client, names []string) ([]*firestore.DocumentRef, error) {
-	pickers := make([]*firestore.DocumentRef, len(names))
-	for i, name := range names {
+func pickerRefsLookup(ctx context.Context, fs *firestore.Client, names []string, all bool) ([]*firestore.DocumentRef, error) {
+	pickers := make([]*firestore.DocumentRef, 0, len(names))
+	if all {
+		snapshots, err := fs.Collection("pickers").Documents(ctx).GetAll()
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range snapshots {
+			pickers = append(pickers, s.Ref)
+		}
+		return pickers, nil
+	}
+
+	for _, name := range names {
 		pickerRef, err := fs.Collection("pickers").Where("name_luke", "==", name).Limit(1).Documents(ctx).Next()
 		if err != nil {
 			return nil, err
 		}
-		pickers[i] = pickerRef.Ref
+		pickers = append(pickers, pickerRef.Ref)
 	}
 	return pickers, nil
 }
@@ -95,6 +106,7 @@ var tE = flag.Float64("te", 3., "Simulated annealing temperature exponent: p = (
 var resetItr = flag.Int("reseti", 10000, "Maximum number of iterations to allow simulated annealing solution to wonder before resetting to best solution found so far.")
 var seed = flag.Int64("seed", -1, "Seed for RNG governing simulated annealing process. Negative values will use system clock to seed RNG.")
 var workers = flag.Int("workers", 1, "Number of workers per simulated picker. Increases odds of finding the global maximum.")
+var doAll = flag.Bool("all", false, "Ignore picker list and simulate all registered pickers still in the streak.")
 var _DRY_RUN = flag.Bool("dryrun", false, "Rather than write the output to Firestore, just report what would have been written.")
 
 func usage() {
@@ -143,7 +155,7 @@ func main() {
 
 	pickers := flag.Args()
 
-	if len(pickers) != 0 {
+	if len(pickers) != 0 || *doAll {
 		log.Printf("Mocking HTTP request for pickers %v week %d", pickers, *weekFlag)
 		w, req := mockRequest(pickers, weekFlag)
 		handler(w, req)
@@ -265,7 +277,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get this user
-	pickerRefs, err := pickerRefsLookup(ctx, fs, pickerNames)
+	pickerRefs, err := pickerRefsLookup(ctx, fs, pickerNames, *doAll)
 	if check(w, err, http.StatusInternalServerError) {
 		return
 	}
@@ -442,6 +454,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	for _, pickerRef := range pickerRefs {
 		iter = picksDoc.Ref.Collection("streaks").Where("picker", "==", pickerRef).Limit(1).Documents(ctx)
 		pickDoc, err := iter.Next()
+		if err == iterator.Done {
+			log.Printf("Picker %s has no streaks", pickerRef.ID)
+			continue
+		}
 		if check(w, err, http.StatusInternalServerError) {
 			return
 		}
@@ -507,7 +523,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("%s clones %v", user, clones)
 		}
 		for _, clone := range clones {
-			delete(players, clone)
+			delete(players, clone.Name())
 		}
 	}
 
@@ -523,7 +539,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	bestStreaks := calculateBestStreaks(ppts)
 
 	// Collect by player
-	streakOptions := collectByPlayer(bestStreaks, players, predictions, &schedule, *weekNumber)
+	streakOptions := collectByPlayer(bestStreaks, players, predictions, &schedule, *weekNumber, duplicates)
 
 	// Print results
 	output := fs.Collection("streak_predictions")
@@ -716,7 +732,7 @@ func calculateBestStreaks(ppts <-chan playerTeamStreakProb) <-chan streakMap {
 	return out
 }
 
-func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *bts.Predictions, schedule *bts.Schedule, weekNumber int) map[string]bpefs.StreakPredictions {
+func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *bts.Predictions, schedule *bts.Schedule, weekNumber int, duplicates map[string][]*bts.Player) map[string]bpefs.StreakPredictions {
 
 	startTime := time.Now()
 
@@ -753,6 +769,13 @@ func collectByPlayer(sms <-chan streakMap, players bts.PlayerMap, predictions *b
 
 			so := bpefs.StreakPrediction{CumulativeProbability: prob, CumulativeSpread: spread, Weeks: weeks}
 			soByPlayer[pt.player] = append(soByPlayer[pt.player], so)
+
+			// duplicate results
+			for _, dupPlayer := range duplicates[pt.player] {
+				soByPlayer[dupPlayer.Name()] = append(soByPlayer[dupPlayer.Name()], so)
+				// now that the simulation is done, add the duplicates back to the player map
+				players[dupPlayer.Name()] = dupPlayer
+			}
 		}
 
 	}

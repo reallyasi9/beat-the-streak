@@ -141,7 +141,7 @@ func NewPlayer(name string, ref *firestore.DocumentRef, remaining Remaining, rem
 // }
 
 // Duplicates returns a list of Players who are duplicates of one another.
-func (pm PlayerMap) Duplicates() map[string][]string {
+func (pm PlayerMap) Duplicates() map[string][]*Player {
 
 	playerHashes := make(map[uint64][]string)
 	for name, player := range pm {
@@ -156,14 +156,14 @@ func (pm PlayerMap) Duplicates() map[string][]string {
 		playerHashes[hash] = append(playerHashes[hash], name)
 	}
 
-	out := make(map[string][]string)
+	out := make(map[string][]*Player)
 	for _, duplicates := range playerHashes {
-		out[duplicates[0]] = make([]string, 0)
+		out[duplicates[0]] = make([]*Player, 0)
 		for _, dup := range duplicates {
 			if dup == duplicates[0] {
 				continue
 			}
-			out[duplicates[0]] = append(out[duplicates[0]], dup)
+			out[duplicates[0]] = append(out[duplicates[0]], pm[dup])
 		}
 	}
 
