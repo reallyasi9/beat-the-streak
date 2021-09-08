@@ -89,12 +89,13 @@ func pickerRefsLookup(ctx context.Context, fs *firestore.Client, names []string)
 }
 
 var weekFlag = flag.Int("week", -1, "Week number. Negative values will calculate week number based on today's date.")
-var maxItr = flag.Int("maxi", 1000000000, "Number of simulated annealing iterations per picker.")
+var maxItr = flag.Int("maxi", 100000000, "Number of simulated annealing iterations per worker.")
 var tC = flag.Float64("tc", 1., "Simulated annealing temperature constant: p = (tc * (maxi - i) / maxi)^te.")
 var tE = flag.Float64("te", 3., "Simulated annealing temperature exponent: p = (tc * (maxi - i) / maxi)^te.")
 var resetItr = flag.Int("reseti", 10000, "Maximum number of iterations to allow simulated annealing solution to wonder before resetting to best solution found so far.")
 var seed = flag.Int64("seed", -1, "Seed for RNG governing simulated annealing process. Negative values will use system clock to seed RNG.")
 var workers = flag.Int("workers", 1, "Number of workers per simulated picker. Increases odds of finding the global maximum.")
+var _DRY_RUN = flag.Bool("dryrun", false, "Rather than write the output to Firestore, just report what would have been written.")
 
 func usage() {
 	w := flag.CommandLine.Output()
@@ -526,20 +527,27 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	// Print results
 	output := fs.Collection("streak_predictions")
-	// Note: only one picker for now!
+
+	if *_DRY_RUN {
+		log.Print("DRY RUN: Would write the following:")
+	}
 	for _, streak := range streakOptions {
 		streak.Schedule = scheduleDoc.Ref
 		streak.Sagarin = sagRateDoc.Ref
 		streak.Season = seasonDoc.Ref
 		streak.PredictionTracker = predictionDoc.Ref
 
-		log.Printf("Writing:\n%v", streak)
+		if *_DRY_RUN {
+			log.Printf("%s: add %+v", output.Path, streak)
+			continue
+		}
 
-		_, wr, err := output.Add(ctx, streak)
+		log.Printf("Writing:\n%+v", streak)
+
+		_, _, err := output.Add(ctx, streak)
 		if check(w, err, http.StatusInternalServerError) {
 			return
 		}
-		log.Printf("Wrote streak %v", wr)
 	}
 
 	http.Error(w, http.StatusText(http.StatusOK), http.StatusOK)
@@ -572,21 +580,6 @@ func (sm *streakMap) update(player string, team bts.Team, spin streakProb) {
 		(*sm)[pt] = streakProb{streak: spin.streak, prob: spin.prob, spread: spin.spread}
 	}
 }
-
-// func (sm streakMap) getBest(player string) streakProb {
-// 	bestp := math.Inf(-1)
-// 	bests := math.Inf(-1)
-// 	bestt := bts.BYE
-// 	for pt, sp := range sm {
-// 		if pt.player != player {
-// 			continue
-// 		}
-// 		if sp.prob > bestp || (sp.prob == bestp && sp.spread > bests) {
-// 			bestt = pt.team
-// 		}
-// 	}
-// 	return sm[playerTeam{player: player, team: bestt}]
-// }
 
 type playerTeamStreakProb struct {
 	player     *bts.Player
@@ -623,10 +616,10 @@ func perPlayerTeamStreaks(ps <-chan *bts.Player, predictions *bts.Predictions) <
 			for i := 0; i < *workers; i++ {
 				wg.Add(1)
 				mySeed := src.Int63()
-				go func(p *bts.Player, out chan<- playerTeamStreakProb) {
-					anneal(mySeed, p, predictions, out)
+				go func(worker int, p *bts.Player, out chan<- playerTeamStreakProb) {
+					anneal(mySeed, worker, p, predictions, out)
 					wg.Done()
-				}(p, out)
+				}(i, p, out)
 			}
 		}
 		wg.Wait()
@@ -636,7 +629,7 @@ func perPlayerTeamStreaks(ps <-chan *bts.Player, predictions *bts.Predictions) <
 	return out
 }
 
-func anneal(seed int64, p *bts.Player, predictions *bts.Predictions, out chan<- playerTeamStreakProb) {
+func anneal(seed int64, worker int, p *bts.Player, predictions *bts.Predictions, out chan<- playerTeamStreakProb) {
 
 	src := rand.NewSource(seed)
 	rng := rand.New(src)
@@ -655,7 +648,7 @@ func anneal(seed int64, p *bts.Player, predictions *bts.Predictions, out chan<- 
 	bestSpread := 0.
 	resetSpread := 0.
 
-	log.Printf("Player %s start: p=%f, s=%f, streak=%s", p.Name(), bestP, bestSpread, bestS)
+	log.Printf("Player %s w %d start: p=%f, s=%f, streak=%s", p.Name(), worker, bestP, bestSpread, bestS)
 	for i := 0; i < maxIterations; i++ {
 		temperature := tConst * float64(maxIterations-i) / float64(maxIterations)
 		temperature = math.Pow(temperature, tExp)
@@ -689,7 +682,7 @@ func anneal(seed int64, p *bts.Player, predictions *bts.Predictions, out chan<- 
 					out <- playerTeamStreakProb{player: p, team: team, streakProb: sp}
 				}
 
-				log.Printf("Player %s itr %d (temp %f): p=%f, s=%f, streak=%s", p.Name(), i, temperature, bestP, bestSpread, bestS)
+				log.Printf("Player %s w %d itr %d (temp %f): p=%f, s=%f, streak=%s", p.Name(), worker, i, temperature, bestP, bestSpread, bestS)
 			}
 
 		} else if countSinceReset < 0 {
