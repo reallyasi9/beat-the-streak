@@ -10,10 +10,8 @@ require (
 	github.com/atgjack/prob v0.0.0-20161220081030-6cfd5d401186
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/segmentio/fasthash v1.0.3
-	golang.org/x/net v0.0.0-20210805182204-aaa1db679c0d // indirect
+	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/oauth2 v0.0.0-20210810183815-faf39c7919d5 // indirect
-	golang.org/x/sys v0.0.0-20210809222454-d867a43fc93e // indirect
-	golang.org/x/text v0.3.7 // indirect
 	google.golang.org/api v0.53.0
 	google.golang.org/grpc v1.40.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0
